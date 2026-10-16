@@ -1,0 +1,648 @@
+/* Codex 皮肤 · 第一版
+   ---------------------------------------------------------------------------
+   上半部分是**观感**：平白实体面、近单色强调、1px 细边、收敛的投影、系统字体、
+   去掉外壳那圈 8px 外缝和大卡片的 10px 圆角。
+   下半部分（「外壳」一节起）是**骨架**：给 webui/scripts/codex-shell.js 建出来的
+   图标栏 + 工作区/会话侧栏上样式，并把官方内容整体右移让位。
+
+   骨架能成立，靠的是：官方布局本来就是「一行 flex，里面 aside + main」。我们只在更外层
+   的根节点上加 padding-left，官方的主区就自动让位了 —— 不需要改它的 DOM，也不改它的路由。
+
+   为什么能盖住官方：官方 token 在 @layer theme 里，本文件不在任何 layer；
+   按 CSS 层叠规则，未分层的声明优先级高于所有分层声明，所以这里不需要比官方更具体。
+   !important 只出现在两处：外壳让位（官方的 inset 写在行内 style 上）和标题栏裁剪
+   （几条 display 规则要互相压过，不加就分不出胜负）。
+
+   想关掉：把本文件连同 webui/scripts/ 一起移出即可，刷新就恢复。
+   --------------------------------------------------------------------------- */
+
+/* ── 浅色 ───────────────────────────────────────────────────────────────── */
+:root,
+:root[data-color-scheme="light"] {
+  --v2-background-bg-base: #ffffff;
+  --v2-background-bg-deep: #f7f7f8;
+  --v2-background-bg-layer-01: #ffffff;
+  --v2-background-bg-layer-02: #f4f4f5;
+  --v2-background-bg-layer-03: #ececee;
+  --v2-background-bg-layer-04: #e4e4e7;
+  --v2-background-bg-inverse: #18181b;
+  --v2-background-bg-contrast: #18181b;
+  --v2-background-bg-button-neutral: #ffffff;
+  --v2-background-bg-accent: #18181b;
+
+  --v2-text-text-base: #18181b;
+  --v2-text-text-muted: #71717a;
+  --v2-text-text-faint: #a1a1aa;
+  --v2-text-text-inverse: #ffffff;
+  --v2-text-text-contrast: #ffffff;
+  --v2-text-text-accent: #18181b;
+  --v2-text-text-accent-hover: #000000;
+
+  --v2-icon-icon-base: #3f3f46;
+  --v2-icon-icon-muted: #71717a;
+  --v2-icon-icon-faint: #a1a1aa;
+  --v2-icon-icon-inverse: #ffffff;
+  --v2-icon-icon-contrast: #f4f4f5;
+  --v2-icon-icon-accent: #18181b;
+  --v2-icon-icon-accent-hover: #000000;
+
+  --v2-border-border-muted: rgba(24, 24, 27, .06);
+  --v2-border-border-base: rgba(24, 24, 27, .09);
+  --v2-border-border-strong: rgba(24, 24, 27, .16);
+  --v2-border-border-inverse: #18181b;
+  --v2-border-border-focus: rgba(24, 24, 27, .40);
+
+  --v2-overlay-simple-overlay-hover: rgba(24, 24, 27, .05);
+  --v2-overlay-simple-overlay-pressed: rgba(24, 24, 27, .08);
+  --v2-overlay-simple-overlay-contrast-hover: rgba(255, 255, 255, .12);
+  --v2-overlay-simple-overlay-contrast-pressed: rgba(255, 255, 255, .22);
+
+  --v2-elevation-raised: 0 1px 2px rgba(24, 24, 27, .05), 0 0 0 .5px rgba(24, 24, 27, .06);
+  --v2-elevation-floating: 0 8px 24px rgba(24, 24, 27, .10), 0 0 0 .5px rgba(24, 24, 27, .08);
+  --v2-elevation-overlay: 0 16px 40px rgba(24, 24, 27, .14), 0 0 0 .5px rgba(24, 24, 27, .10);
+}
+
+/* ── 深色 ───────────────────────────────────────────────────────────────── */
+:root[data-color-scheme="dark"] {
+  --v2-background-bg-base: #1c1c1f;
+  --v2-background-bg-deep: #171718;
+  --v2-background-bg-layer-01: #1c1c1f;
+  --v2-background-bg-layer-02: #232326;
+  --v2-background-bg-layer-03: #29292d;
+  --v2-background-bg-layer-04: #323237;
+  --v2-background-bg-inverse: #ededf0;
+  --v2-background-bg-contrast: #ededf0;
+  --v2-background-bg-button-neutral: #26262a;
+  --v2-background-bg-accent: #ededf0;
+
+  --v2-text-text-base: #ededf0;
+  --v2-text-text-muted: #9d9da6;
+  --v2-text-text-faint: #6e6e77;
+  --v2-text-text-inverse: #18181b;
+  --v2-text-text-contrast: #18181b;
+  --v2-text-text-accent: #ededf0;
+  --v2-text-text-accent-hover: #ffffff;
+
+  --v2-icon-icon-base: #c8c8cf;
+  --v2-icon-icon-muted: #9d9da6;
+  --v2-icon-icon-faint: #6e6e77;
+  --v2-icon-icon-inverse: #18181b;
+  --v2-icon-icon-contrast: #18181b;
+  --v2-icon-icon-accent: #ededf0;
+  --v2-icon-icon-accent-hover: #ffffff;
+
+  --v2-border-border-muted: rgba(255, 255, 255, .06);
+  --v2-border-border-base: rgba(255, 255, 255, .10);
+  --v2-border-border-strong: rgba(255, 255, 255, .18);
+  --v2-border-border-inverse: #ededf0;
+  --v2-border-border-focus: rgba(255, 255, 255, .45);
+
+  --v2-overlay-simple-overlay-hover: rgba(255, 255, 255, .055);
+  --v2-overlay-simple-overlay-pressed: rgba(255, 255, 255, .085);
+  --v2-overlay-simple-overlay-contrast-hover: rgba(0, 0, 0, .12);
+  --v2-overlay-simple-overlay-contrast-pressed: rgba(0, 0, 0, .22);
+
+  --v2-elevation-raised: 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 .5px rgba(255, 255, 255, .06);
+  --v2-elevation-floating: 0 8px 24px rgba(0, 0, 0, .50), 0 0 0 .5px rgba(255, 255, 255, .08);
+  --v2-elevation-overlay: 0 16px 40px rgba(0, 0, 0, .60), 0 0 0 .5px rgba(255, 255, 255, .10);
+}
+
+/* ── 字体 ─────────────────────────────────────────────────────────────────
+   不写 !important：设置 → 外观 → 字体 里的选择是行内样式，仍然压得住这里，
+   用户自己挑的字体不会被皮肤吃掉。 */
+:root {
+  --font-family-sans: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+}
+
+/* ── 外壳：拿掉那圈 8px 外缝 ──────────────────────────────────────────────
+   这三个变量由 shell.tsx 写在行内 style 上，改它们比追着每个消费点的 margin/padding 打补丁稳。 */
+[style*="--shell-inline-inset"] {
+  --shell-inline-inset: 0px !important;
+  --shell-top-inset: 0px !important;
+  --shell-bottom-inset: 0px !important;
+}
+
+/* ── 摊平大卡片 ───────────────────────────────────────────────────────────
+   只针对那几个整屏面板；按钮、chip、输入框该圆的还圆。 */
+[data-slot="home-panel"],
+.settings-screen {
+  border-radius: 0 !important;
+}
+
+/* 面板之间的分界改用细边，而不是靠投影和留白缝 */
+[data-slot="home-panel"],
+.settings-screen {
+  box-shadow: none !important;
+  outline: 1px solid var(--v2-border-border-muted);
+  outline-offset: -1px;
+}
+
+/* 标题栏：和主区并成一片，不留一条独立的灰带。
+   它的高度是行内 style（calc(28px + 安全区…)），只改背景不改高度 —— 右边那个功能插槽在有
+   内容时还要用，所以这条带子保留，只是看不见了。 */
+[data-slot="titlebar-v2"] {
+  background-color: var(--v2-background-bg-base);
+  border-bottom: 0;
+}
+
+/* 标题栏里和侧栏重复的入口（主页 / 标签 / 新建会话）收掉，只留右边的功能插槽。
+   右边那组是官方 JSX 里最后一个子节点（titlebar.tsx:766 起），所以 :last-child 是结构保证的；
+   .flex-1 是它前面的撑开元素，留着才能让插槽停在右边。 */
+[data-slot="titlebar-v2"] > div > * {
+  display: none !important;
+}
+
+[data-slot="titlebar-v2"] > div > .flex-1 {
+  display: block !important;
+}
+
+[data-slot="titlebar-v2"] > div > :last-child {
+  display: flex !important;
+}
+
+/* 官方那排横向标签栏和左侧栏重复了，收掉它。
+   关闭标签仍然可用：命令 tab.close 的键位还在（默认 Ctrl+W），命令面板里也在。 */
+[data-slot="titlebar-tabs"] {
+  display: none !important;
+}
+
+/* 同理：万一在设置里开了「竖向标签」，官方那栏也别和我们的侧栏叠在一起 */
+[data-slot="vertical-tabs-sidebar"] {
+  display: none !important;
+}
+
+/* ═══ 外壳：图标栏 + 工作区/会话侧栏 ═══════════════════════════════════════
+   DOM 由 webui/scripts/codex-shell.js 建，这里只负责长相。
+   宽度约定：rail 52px，侧栏 260px，合计 312px；折叠时只有 52px。
+   这个数字由脚本写进 --ocw-gutter，下面两处都读它。 */
+
+/* 官方内容整体右移给外壳让位。
+   锚点是 shell.tsx 写在行内 style 上的 --shell-inline-inset —— 那个选择器只命中外壳根节点，
+   不会误伤别的东西。box-sizing 明写出来，免得官方没上 preflight 时 padding 撑出横向滚动。 */
+[style*="--shell-inline-inset"] {
+  padding-left: var(--ocw-gutter, 0px) !important;
+  box-sizing: border-box !important;
+}
+
+#ocw {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  font-family: var(--font-family-sans);
+  font-size: 13px;
+  line-height: 1.35;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── 图标栏 ── */
+.ocw-rail {
+  flex: none;
+  width: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 0 10px;
+  background: var(--v2-background-bg-deep);
+  border-right: 1px solid var(--v2-border-border-muted);
+}
+
+.ocw-rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.ocw-rail-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-icon-icon-muted);
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease;
+}
+
+.ocw-rail-btn:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-icon-icon-base);
+}
+
+.ocw-rail-btn:focus-visible {
+  outline: 2px solid var(--v2-border-border-focus);
+  outline-offset: -1px;
+}
+
+.ocw-rail-btn.is-active {
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-icon-icon-base);
+}
+
+/* ── 侧栏 ── */
+.ocw-sidebar {
+  flex: none;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--v2-background-bg-base);
+  border-right: 1px solid var(--v2-border-border-muted);
+}
+
+html[data-ocw-collapsed] .ocw-sidebar {
+  display: none;
+}
+
+.ocw-sidebar-head {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+}
+
+.ocw-sidebar-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--v2-text-text-base);
+}
+
+.ocw-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ocw-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--v2-icon-icon-muted);
+  cursor: pointer;
+}
+
+.ocw-icon-btn:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-icon-icon-base);
+}
+
+/* 新聊天 */
+.ocw-new {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 0 8px 6px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-text-text-base);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ocw-new:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+}
+
+.ocw-new svg {
+  color: var(--v2-icon-icon-muted);
+  flex: none;
+}
+
+.ocw-new.is-busy {
+  opacity: .6;
+  pointer-events: none;
+}
+
+/* 搜索框 */
+.ocw-filter {
+  flex: none;
+  margin: 0 8px 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 8px;
+  background: var(--v2-background-bg-layer-01);
+  color: var(--v2-text-text-base);
+  font: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ocw-filter:focus {
+  outline: none;
+  border-color: var(--v2-border-border-focus);
+}
+
+/* 列表 */
+.ocw-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 8px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--v2-border-border-strong) transparent;
+}
+
+.ocw-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ocw-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: var(--v2-border-border-strong);
+}
+
+.ocw-group + .ocw-group {
+  margin-top: 1px;
+}
+
+.ocw-group-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ocw-group-head {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-text-text-base);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ocw-group-head:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+}
+
+/* 「在这个工作区新建会话」：平时收着，划过整个工作区行才露出来 */
+.ocw-group-new {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--v2-icon-icon-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, background-color .12s ease;
+}
+
+.ocw-group-row:hover .ocw-group-new,
+.ocw-group-new:focus-visible {
+  opacity: 1;
+}
+
+.ocw-group-new:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-icon-icon-base);
+}
+
+.ocw-caret {
+  flex: none;
+  display: flex;
+  width: 13px;
+  height: 13px;
+  color: var(--v2-icon-icon-faint);
+  transform: rotate(90deg);
+  transition: transform .12s ease;
+}
+
+.ocw-group.is-collapsed .ocw-caret {
+  transform: rotate(0deg);
+}
+
+.ocw-group-icon {
+  flex: none;
+  display: flex;
+  color: var(--v2-icon-icon-muted);
+}
+
+.ocw-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.ocw-session {
+  display: block;
+  width: 100%;
+  padding: 6px 8px 6px 33px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-text-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ocw-session:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-text-text-base);
+}
+
+.ocw-session.is-active {
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-text-text-base);
+}
+
+.ocw-session-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ocw-more {
+  display: block;
+  width: 100%;
+  padding: 5px 8px 5px 33px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--v2-text-text-faint);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ocw-more:hover {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-text-text-muted);
+}
+
+.ocw-empty {
+  padding: 10px 8px;
+  color: var(--v2-text-text-faint);
+}
+
+/* ── 草稿屏（新聊天）那行提问 ──────────────────────────────────────────────
+   官方这块本来只有一枚品牌标 + composer，补一行「你想让我们在 <工作区> 中构建什么？」，
+   就是参考图里 Codex 的样式。插在品牌标之后、composer 之前。 */
+.ocw-hero {
+  margin: 16px auto 0;
+  max-width: 660px;
+  color: var(--v2-text-text-muted);
+  font-size: 17px;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.ocw-hero code {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-text-text-base);
+  font-size: .92em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ── 开草稿时的过渡：点「新聊天」后要先切到目标工作区再按键，别让上一个会话 /
+   官方首页在中间闪一下，草稿屏一出现就撤掉 ── */
+html[data-ocw-drafting] [data-slot="home-panel"],
+html[data-ocw-drafting] [data-slot="session-chat-panel"] {
+  visibility: hidden !important;
+}
+
+/* ── 二次折叠：一轮里所有过程收成一行「用时 9m 38s」 ────────────────────────────
+   表头由脚本插在「这一轮的最终回复行」里面（那行的高度就成了表头高度），
+   过程行的隐藏规则由脚本按「轮」生成结构选择器，见 webui/scripts/codex-shell.js。
+   为什么隐藏规则不写成「逐行打属性」：虚拟列表在行挂上来的那一刻就读高度，晚一步再
+   改（哪怕只晚一帧），它会先按原高记下这一行、之后再纠正；这次纠正落在可视区里，
+   官方不补滚动，于是整屏往回跳一下 —— 就是那个「往回闪」。结构选择器在行第一次
+   布局时就已经算好，官方量到的从一开始就是 0。
+   下面这条是兜底（结构没命中时接手），脚本里最多几十条，见 codex-shell.js。
+   为什么挂在最终回复行而不是本轮第一行：最终回复行收起/展开都在视口里，
+   表头不会随着滚动换行（换一次就是两次行高突变，就是抖动）。
+   ------------------------------------------------------------------------ */
+/* 兜底：脚本把「已判定要压扁」的行在盒子外面打上 data-ocw-fold。结构规则命中时用不到它。 */
+[data-ocw-fold] {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden !important;
+}
+
+[data-ocw-fold] > [data-index] {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden !important;
+  content-visibility: hidden;
+}
+
+.ocw-turn-head {
+  padding: 8px 0 2px;
+}
+
+.ocw-turn-head-inner {
+  display: flex;
+  min-width: 0;
+}
+
+.ocw-turn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 6px 1px 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--v2-text-text-weak);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 440;
+  line-height: 18px;
+  letter-spacing: -0.04px;
+  text-align: left;
+}
+
+.ocw-turn-toggle:hover {
+  color: var(--v2-text-text-base);
+}
+
+.ocw-turn-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ocw-turn-caret {
+  display: inline-flex;
+  align-items: center;
+  color: var(--v2-icon-icon-faint, currentColor);
+  transition: transform 0.15s ease;
+}
+
+.ocw-turn-toggle[data-ocw-open] .ocw-turn-caret {
+  transform: rotate(90deg);
+}
+
+/* 压缩块：收起时只剩「会话已压缩 · 13万 输入 · 6132 输出」那条线，点它才展开总结。
+   这条收起规则写成纯 CSS（而不是等脚本挂上属性）：行第一次布局时就已经是收起的，
+   官方量到的就是收起后的高度 —— 等到脚本再挂属性、高度从几千像素掉下来，就是抖动。 */
+[data-component="session-compaction-message"]:not([data-ocw-open]):has(> [data-component="text-part"])
+  > [data-component="text-part"],
+[data-component="session-compaction-message"]:not([data-ocw-open]):has(> [data-component="text-part"])
+  > :first-child {
+  display: none;
+}
+
+[data-ocw-compact-toggle] {
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+[data-ocw-compact-toggle]:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.ocw-compact-caret {
+  transform: rotate(0deg);
+}
+
+[data-ocw-compact][data-ocw-open] .ocw-compact-caret {
+  transform: rotate(90deg);
+}

@@ -1,0 +1,24 @@
+diff --git a/packages/app/src/session/timeline/virtualizer.tsx b/packages/app/src/session/timeline/virtualizer.tsx
+index fe26622..361f78b 100644
+--- a/packages/app/src/session/timeline/virtualizer.tsx
++++ b/packages/app/src/session/timeline/virtualizer.tsx
+@@ -365,10 +365,15 @@ export function createTimelineVirtualizer(input: Input) {
+     // Prepended rows can resize more than once as deferred content mounts. Keep
+     // compensating while they remain entirely above the visible content fold.
+     const first = instance.range?.startIndex
+-
+-    const adjust = addedKeys.has(String(item.key))
+-      ? item.end <= (instance.scrollOffset ?? 0) + instance.scrollAdjustments + instance.options.scrollMargin
+-      : first !== undefined && item.index < first
++    const fold = (instance.scrollOffset ?? 0) + instance.scrollAdjustments + instance.options.scrollMargin
++    // A row that gives height back while it is still on screen vacates space under the
++    // reader: every row after it moves up by `delta`, and the viewport has to follow so the
++    // rows they are reading stay put. Ending above the fold is only the narrow case of that,
++    // and a row that lands inside the viewport still carrying the `fallbackItemSize`
++    // estimate settles under the reader with exactly this problem.
++    const vacatesOnScreen = delta < 0 && item.end <= fold + (instance.scrollRect?.height ?? 0)
++    const adjust =
++      item.end <= fold || vacatesOnScreen || (first !== undefined && item.index < first)
+ 
+     if (!touchScrolling || input.pinned()) return adjust
+ 

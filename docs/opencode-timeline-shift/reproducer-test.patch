@@ -1,0 +1,96 @@
+diff --git a/packages/app/e2e/performance/timeline-stability/scroll-interaction.spec.ts b/packages/app/e2e/performance/timeline-stability/scroll-interaction.spec.ts
+index 392d693..3ae19c9 100644
+--- a/packages/app/e2e/performance/timeline-stability/scroll-interaction.spec.ts
++++ b/packages/app/e2e/performance/timeline-stability/scroll-interaction.spec.ts
+@@ -115,6 +115,91 @@ test("does not reverse visible rows when the user wheels during shell remeasurem
+   await reportVisualStability(testInfo, "wheel-during-resize", trace, rowPairPlan(regions, 1))
+ })
+ 
++test("keeps visible rows locked to the scroll while wheeling up through history", async ({ page }) => {
++  await setupTimeline(page, {
++    messages: history(60),
++    viewport: { width: 1400, height: 700 },
++    reducedMotion: true,
++  })
++
++  const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
++  // Big enough that rows still carrying the `fallbackItemSize` estimate land inside the
++  // viewport rather than only in the mount buffer above it.
++  const wheels = 480
++
++  const sample = () =>
++    scroller.evaluate((element) => {
++      const view = element.getBoundingClientRect()
++
++      return {
++        scrollTop: element.scrollTop,
++        view: { top: view.top, bottom: view.bottom },
++        rows: Object.fromEntries(
++          [...element.querySelectorAll<HTMLElement>("[data-timeline-key]")].map((row) => {
++            const rect = row.getBoundingClientRect()
++
++            return [row.dataset.timelineKey!, { top: rect.top, bottom: rect.bottom }]
++          }),
++        ),
++      }
++    })
++
++  await scroller.evaluate((element) => (element.scrollTop = element.scrollHeight))
++  await expect
++    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
++    .toBeLessThanOrEqual(1)
++
++  // Leave the follow-the-bottom state first: while the timeline is still pinned to the end
++  // the reader's scroll is deliberately overridden, which is not what this test is about.
++  await scroller.evaluate((element) => {
++    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -2000 }))
++    element.scrollTop -= 2000
++  })
++  await expect
++    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
++    .toBeGreaterThan(1000)
++  await page.waitForTimeout(400)
++
++  for (let step = 0; step < 6; step++) {
++    const before = await sample()
++
++    await scroller.evaluate((element, delta) => {
++      element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -delta }))
++      element.scrollTop -= delta
++    }, wheels)
++    await page.waitForTimeout(300)
++
++    const after = await sample()
++    const scrollDelta = before.scrollTop - after.scrollTop
++
++    expect(scrollDelta).toBeGreaterThan(0)
++
++    // A row that was on screen must travel exactly as far as the wheel asked for. The
++    // virtualizer is free to move `scrollTop` further than that (that is how it keeps the
++    // viewport still while rows off screen settle), so this compares against the wheel
++    // distance, not against the resulting scroll delta. Rows that were still unmeasured
++    // before the step are estimated, so they settle to their real height while the wheel is
++    // in flight; their estimate error has to be absorbed by the scroll offset, otherwise the
++    // rows the user is reading get dragged along with it.
++    const drifted = Object.entries(after.rows)
++      .filter(([key]) => {
++        const prior = before.rows[key]
++
++        return prior !== undefined && prior.bottom > before.view.top && prior.top < before.view.bottom
++      })
++      .map(([key, rect]) => ({
++        key,
++        drift: Math.round((rect.top - before.rows[key]!.top - wheels) * 10) / 10,
++      }))
++      .filter((row) => Math.abs(row.drift) > 2)
++
++    expect(
++      drifted,
++      `step ${step + 1} wheels=${wheels} scrollDelta=${scrollDelta} contentDelta=${scrollDelta - wheels} drifted: ${JSON.stringify(drifted)}`,
++    ).toEqual([])
++  }
++})
++
+ test("keeps moving upward while drag-selecting above the timeline", async ({ page }) => {
+   await setupTimeline(page, {
+     messages: history(80),

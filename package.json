@@ -1,0 +1,13 @@
+{
+  "name": "opencode-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local web UI and tray icon for the opencode background service",
+  "scripts": {
+    "start": "bun run src/start.mjs",
+    "tray": "bun run scripts/tray.mjs",
+    "install-hook": "bun run scripts/install-hook.mjs",
+    "uninstall-hook": "bun run scripts/install-hook.mjs --uninstall"
+  }
+}
