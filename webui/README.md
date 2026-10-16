@@ -25,7 +25,7 @@
 - 官方外壳带 CSP（`style-src 'self' 'unsafe-inline'`），`/styles/*.css` 是同源，正常加载。
 - 只在**页面导航请求**（`Accept` 里含 `text/html`）上注入，并且会为这类请求去掉 `accept-encoding` 以便改写响应体；`/_assets/*` 的压缩和缓存都不受影响。
 - 如果 `webui/index.html` 也存在，它优先，而且**不再注入**：外壳换成你自己的，链什么由你决定。
-- 目前只有一个：`webui/styles/codex.css`（Codex 皮肤：观感 + 图标栏/侧栏的骨架样式 + 草稿屏那行提问 + 开草稿时的过渡遮罩 + 二次折叠的表头与压缩块开关样式）。移出这个目录就恢复官方外观，不用重启。
+- 目前只有一个：`webui/styles/codex.css`（Codex 皮肤：观感 + 图标栏/侧栏的骨架样式 + 草稿屏那行提问 + 开草稿时的过渡遮罩）。移出这个目录就恢复官方外观，不用重启。
 
 ## 换个骨架：`webui/scripts/`
 
@@ -37,7 +37,7 @@
 - **按文件名排序**，和样式表一致。
 - 官方外壳的 CSP 是 `script-src 'self' 'sha256-…'`，同源外链脚本被 `'self'` 放行，不需要改 CSP。
 - 官方给界面留的钩子（`data-slot="titlebar-v2"`、`data-component="new-session-wordmark"` 等）都是稳定的选择器，脚本靠它们定位，不靠结构猜。
-- 目前只有一个：`webui/scripts/codex-shell.js`。它做三件核心的事 —— 建 rail 和侧栏的 DOM（从 `/api/project` + `/api/session` 读列表，点会话时用 `history.pushState` + `popstate` 驱动官方路由）；**开一张官方草稿**（借 `mod+t` 键位触发官方的 `tab.new`，所以点「新聊天」不落库；顺带冷启动落 `/` 时转进草稿、草稿屏补一行 Codex 式提问、图标栏上加一颗明暗切换）；以及**会话时间线的二次折叠**（一轮的全部过程收成一行「用时 Xm Ys ›」，点开是过程、最后是回复；压缩块折成「会话已压缩 · 用量」一条线）。**对话、消息渲染、工具卡片、diff、权限、终端全部仍是官方的**。
+- 目前只有一个：`webui/scripts/codex-shell.js`。它做三件核心的事 —— 建 rail 和侧栏的 DOM（从 `/api/project` + `/api/session` 读列表，点会话时用 `history.pushState` + `popstate` 驱动官方路由）；**开一张官方草稿**（借 `mod+t` 键位触发官方的 `tab.new`，所以点「新聊天」不落库；顺带冷启动落 `/` 时转进草稿、草稿屏补一行 Codex 式提问、图标栏上加一颗明暗切换）；以及给事件流补上 `Accept: text/event-stream`（没有它官方界面用不了，见下）。**对话、消息渲染、工具卡片、diff、权限、终端全部仍是官方的**。
 
 > ⚠️ 这个脚本同时是一个**必要的兼容补丁**：官方 `request-queue.ts` 对 `/api/event` 直通时那个 `Request` 没有 `Accept` 头，本机 Chrome 只在 `Accept` 恰好是 `text/event-stream` 时才把该 MIME 的响应交给 `fetch`，于是事件流永远连不上 → 模型列表空、发送被拦、首页停在"加载中"。脚本顶部包了一层 `window.fetch` 专门给这个路径补 `Accept`。**所以移出 `webui/scripts/` 不只是丢外观，界面会退化成用不了**（只移 `webui/styles/` 则只丢外观）。细节见 `docs/codex-style-plan.md` 第五节。
 
