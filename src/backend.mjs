@@ -22,5 +22,14 @@ export function createBackend({ service = Service, log = () => {} } = {}) {
         .finally(() => { pending = undefined })
       return pending
     },
+    // The service is gone (auto-sleep stopped it); the next request starts a fresh one.
+    retire() {
+      if (!pending) phase = "idle"
+    },
+    // Auto-sleep's stop, through the same injected service as start, so a test fixture
+    // can never reach the real CLI.
+    stop() {
+      return service.stop()
+    },
   }
 }

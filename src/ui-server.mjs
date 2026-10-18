@@ -23,6 +23,7 @@ import { createServer, request as httpRequest } from "node:http"
 import { basename, extname, join, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { authorization } from "./service.mjs"
+import { autoSleep, idleVerdict } from "./idle.mjs"
 import { createBackend } from "./backend.mjs"
 
 const sourceDir = fileURLToPath(new URL(".", import.meta.url))
@@ -78,11 +79,72 @@ export function overlayScripts(overlayDir) {
     .map((name) => join(dir, name))
 }
 
-export function createUiServer({ overlayDir, log = () => {}, lazy = false, backend = createBackend({ log }) }) {
+export function createUiServer({ overlayDir, log = () => {}, lazy = false, backend = createBackend({ log }), idleMs, sweepMs }) {
   const overlay = resolve(overlayDir)
+
+  // Auto-sleep state: the last request that was not the tray's own probe, the live event
+  // streams (one per open browser tab), and how many times the service has been stopped.
+  const sleep = autoSleep()
+  const idleLimit = idleMs ?? sleep.ms
+  const sweepEvery = sweepMs ?? Math.min(60_000, Math.max(5_000, idleLimit / 2))
+  let lastTouch = Date.now()
+  let streams = 0
+  let sleeps = 0
+
+  if (idleLimit > 0) {
+    const timer = setInterval(() => void sweep(), sweepEvery)
+    timer.unref?.() // never keep a test process (or a gateway nobody watches) alive for this
+  }
+
+  async function sweep() {
+    if (backend.phase !== "ready") return
+
+    const verdict = idleVerdict({
+      streams,
+      idleFor: Date.now() - lastTouch,
+      sessionAge: await newestSessionAge(),
+      ms: idleLimit,
+    })
+    if (verdict.action === "keep") return
+
+    try {
+      await backend.stop()
+      backend.retire()
+      sleeps++
+      log(`auto-sleep: stopped the opencode background service (${verdict.reason})`)
+    } catch (error) {
+      log(`auto-sleep failed: ${error.message}`)
+    }
+  }
+
+  // The service is shared with the TUI and the desktop app, which never pass through this
+  // gateway, so their activity is read from the service itself. An unknown answer (probe
+  // failed, no sessions) counts as "quiet", while a failed probe counts as "recently used":
+  // a flaky network must never stop a service somebody is on.
+  async function newestSessionAge() {
+    try {
+      const found = await backend.discover()
+      if (!found) return 0
+      const response = await fetch(`${found.url}/api/session?order=desc`, {
+        headers: { authorization: authorization(found) },
+        signal: AbortSignal.timeout(5_000),
+      })
+      if (!response.ok) return 0
+      const sessions = await response.json()
+      const updated = Array.isArray(sessions?.data) ? sessions.data[0]?.time?.updated : undefined
+      return typeof updated === "number" ? Date.now() - updated : Infinity
+    } catch {
+      return 0
+    }
+  }
 
   return createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost")
+
+    // Everything except the tray's own metadata probe counts as "somebody is here". The
+    // probe runs every 2s for as long as the icon lives, so counting it would defeat the
+    // whole feature; the start POST and the loading page are real user actions and count.
+    if (url.pathname !== "/__opencode-web") lastTouch = Date.now()
 
     // Lets a second invocation of `bun run start` notice this server instead of starting another.
     if (url.pathname === "/__opencode-web")
@@ -90,7 +152,15 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
         response,
         200,
         { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-        JSON.stringify({ ok: true, pid: process.pid, mode: lazy ? "lazy" : "normal", backend: backend.phase }),
+        JSON.stringify({
+          ok: true,
+          pid: process.pid,
+          mode: lazy ? "lazy" : "normal",
+          backend: backend.phase,
+          ...(idleLimit > 0
+            ? { autoSleep: { minutes: idleLimit / 60_000, streams, idleForMs: Date.now() - lastTouch, sleeps } }
+            : {}),
+        }),
       )
 
     // Opening a page is the activation step; probes, icons and assets cannot
@@ -132,6 +202,13 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
       // assets after an overlay file replaces one of them.
       if (url.pathname === "/sw.js" || url.pathname === "/registerSW.js")
         return void end(response, 404, { "cache-control": "no-store" })
+    }
+
+    // A live /api/event stream means a browser tab has the UI open: it holds one for as
+    // long as the tab lives, and the connection ends when the tab (or the UI) goes away.
+    if (url.pathname === "/api/event") {
+      streams++
+      response.on("close", () => { streams-- })
     }
 
     return void proxy(request, response, log, shell, inject, () => lazy ? backend.discover() : backend.start())

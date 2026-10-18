@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createUiServer, overlayScripts, overlayStyles } from "./ui-server.mjs"
 import { createBackend } from "./backend.mjs"
+import { autoSleep } from "./idle.mjs"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const overlayDir = join(root, "webui")
@@ -72,6 +73,10 @@ if (lazy) {
     log("the UI will connect as soon as one is available")
   }
 }
+
+const sleep = autoSleep()
+if (sleep.enabled)
+  log(`auto-sleep: the background service stops after ${sleep.minutes} idle minutes (OPENCODE_WEB_IDLE_MINUTES to tune, OPENCODE_WEB_SLEEP=0 to disable)`)
 
 if (shouldOpen) openBrowser(url)
 log("press Ctrl+C to stop")

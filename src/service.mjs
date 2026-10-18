@@ -99,6 +99,11 @@ export async function restart() {
   return resolve()
 }
 
+/** Stops the background service, e.g. once the web UI has been idle for a while. */
+export async function stop() {
+  await run([cliPath(), "service", "stop"])
+}
+
 function run(command) {
   const [file, ...args] = command
   return new Promise((done, fail) => {

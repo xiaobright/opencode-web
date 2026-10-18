@@ -85,17 +85,24 @@ bun run standby
 
 UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登录**。代理每次请求都重新解析当前服务，opencode 重启、换端口都不用重启本进程。
 
-**3. 默认图标跟着服务。** `tray/tray.ps1` 每 2 秒探一次服务：
+**3. 图标常驻，服务可休眠。** `tray/tray.ps1` 每 2 秒探一次服务：
 
 - 探到 → 显示图标（提示里带版本和地址）；
-- 连续失败 2 次（约 4 秒）→ 隐藏图标（服务重启时不会闪）；
-- 连续失败 5 次（约 10 秒）→ 图标自己退出，WebUI 也一起收掉。
+- 探不到 → 图标留着当入口，提示「待用，点击启动」——服务不在可能是自动休眠（见下），点一下打开网页，下一个页面请求就把服务拉起来。
 
 关闭窗口/图标不会影响 opencode 后台服务，除非你选「退出」。
 
-传入 `--lazy`（PowerShell 参数 `-Lazy`）后，托盘只查看网页代理的状态，不直接探测后台，不随后台退出。此模式也会禁止启动时自动打开浏览器。`--no-service` 则保留“跟随已有后台”的原义，网页代理不会再绕过它主动启动后台。
+传入 `--lazy`（PowerShell 参数 `-Lazy`）后，托盘只查看网页代理的状态，不随后台退出（待用模式的完整说明见上一节）。`--no-service` 保留“跟随已有后台”的原义：网页代理不会绕过它主动启动后台。
 
-**4. 钩子。** opencode 的插件 API **没有服务启动/停止的生命周期钩子**（hook 都挂在 tool / session / permission / shell / aisdk 这些域上）。但插件的 `setup` 会在**服务第一次为某个目录构建服务图时**执行 —— 也就是 TUI / 桌面端 / 网页端一开始用这个服务的那一刻。所以 `hook/opencode-web-tray.js` 就挂在这里：服务被用到 → 拉起托盘（已经在跑就跳过）。托盘再自己盯着服务，服务没了就退。这样就有「后台一启动它就常驻，随后台服务一起退出」的效果，还不需要开机自启。
+**4. 自动休眠。** 服务是 TUI、桌面端、网页端共用的，不能谁想关就关。网关是唯一所有网页流量都经过的进程，「没打开」由三个信号同时空闲来判定（`src/idle.mjs`）：
+
+- **无请求**：`OPENCODE_WEB_IDLE_MINUTES` 分钟（默认 15）内没有任何经过网关的请求。托盘自己每 2 秒的 `/__opencode-web` 探活不算，否则永远熄不掉；
+- **无事件流**：每个开着的浏览器标签都持有一条 `/api/event` 长连接，关标签才断 —— 这是「网页开着」最硬的证据，开着的标签不点也算在用；
+- **无会话活跃**：TUI 和桌面端不走网关，所以休眠前直接从服务读 `/api/session`，窗口内有会话更新就接着等。
+
+三条全空才执行 `opencode service stop`，然后把自己记的相位清零；下次打开网页（加载页 POST 或普通请求）会重新 `opencode service start`。TUI 那侧也不用担心被掏空：它的客户端本来就会 `Service.ensure`，服务没了下次用时自己拉起来。休眠开关和时长见下方环境变量；`/__opencode-web` 的 JSON 里带 `autoSleep` 字段（剩余空闲时间、长连接数、已休眠次数），图标和排错都能用。
+
+**5. 钩子。** opencode 的插件 API **没有服务启动/停止的生命周期钩子**（hook 都挂在 tool / session / permission / shell / aisdk 这些域上）。但插件的 `setup` 会在**服务第一次为某个目录构建服务图时**执行 —— 也就是 TUI / 桌面端 / 网页端一开始用这个服务的那一刻。所以 `hook/opencode-web-tray.js` 就挂在这里：服务被用到 → 拉起托盘（已经在跑就跳过）。托盘随后台状态常驻，服务再起来时图标自动回来。这样就有「后台一启动它就常驻」的效果，还不需要开机自启。
 
 `bun run install-hook` 会把插件写到全局插件目录 `~/.config/opencode/plugin/opencode-web-tray.js`（所有 opencode 客户端共用同一个服务，所以影响范围正好是全机）。删掉文件或 `bun run uninstall-hook` 即可还原。
 
@@ -106,6 +113,8 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 | `OPENCODE_WEB_PORT` | 本地网页端口，默认 53123 |
 | `OPENCODE_BIN` | opencode 可执行文件路径，默认 `%APPDATA%\npm\node_modules\@opencode\cli\bin\opencode.exe`，找不到就用 PATH 里的 `opencode` |
 | `OPENCODE_WEB_SHELL` | 跑托盘的 shell，默认优先 `pwsh`，回退 `powershell.exe` |
+| `OPENCODE_WEB_IDLE_MINUTES` | 自动休眠的空闲时长（分钟），默认 15；支持小数 |
+| `OPENCODE_WEB_SLEEP` | 设为 `0` 关闭自动休眠，服务随网关一直运行 |
 
 日志：托盘写在项目下 `.tray.log`，钩子写在 `%TEMP%\opencode-web-hook.log`。
 

@@ -2,9 +2,10 @@
 #
 # opencode-web tray icon.
 #
-# One resident icon that follows the opencode background service: it appears while the service is up,
-# hides itself when the service goes away, disappears for good shortly after the service exits, and can
-# start/stop the local web UI on demand.
+# One resident icon: it shows the running service when there is one, and stays as the
+# entry point when the service is away (auto-sleep stops it after the web UI has been idle),
+# so a click opens the gateway and the next page open starts the service again. It can also
+# start/stop the local web UI and the service on demand.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tray\tray.ps1 [-Port 53123] [-NoBrowser] [-NoService]
 #
@@ -227,10 +228,12 @@ function Update-Tray {
   }
 
   $state.Failures++
-  # Two missed probes (~4s) hide the icon; ten seconds of silence means the service is gone for real,
-  # so this icon goes with it.
-  if ($state.Failures -eq 2 -and $icon.Visible) { $icon.Visible = $false; Write-Log "the service went away" }
-  if ($state.Failures -ge 5) { Close-Tray $false }
+  # The service being away is a normal state now: auto-sleep stops it once the web UI has
+  # been idle, and a click brings it back through the gateway. The icon therefore stays as
+  # the entry point instead of exiting with the service.
+  if ($state.Failures -eq 2) { Write-Log "no service running; the icon stays as the entry point" }
+  $icon.Text = "OpenCode · 待用，点击启动"
+  if (-not $icon.Visible) { $icon.Visible = $true }
 }
 
 # --- start ------------------------------------------------------------------

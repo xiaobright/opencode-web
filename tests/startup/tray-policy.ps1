@@ -25,6 +25,9 @@ foreach ($phase in @('idle', 'starting', 'ready', 'error')) {
 }
 if ($script:FindCalls -ne 0 -or $script:CloseCalls -ne 0) { throw 'Standby followed or exited with the backend' }
 $Lazy = $false
-1..5 | ForEach-Object { Update-Tray }
-if ($script:FindCalls -ne 5 -or $script:CloseCalls -ne 1) { throw 'Normal tray no longer follows the service' }
-Write-Output 'Tray policy passed: standby remains visible without backend probes; normal mode still follows service exit.'
+1..8 | ForEach-Object { Update-Tray }
+if ($script:FindCalls -lt 8) { throw 'Normal tray no longer probes the service' }
+if ($script:CloseCalls -ne 0) { throw 'Normal tray exited with the service; auto-sleep needs it resident' }
+if (-not $icon.Visible) { throw 'Normal tray hid itself while the service was merely sleeping' }
+if ($icon.Text -notlike '*待用*') { throw "Normal tray lost its entry-point text: $($icon.Text)" }
+Write-Output 'Tray policy passed: standby remains visible without backend probes; a sleeping service keeps the icon as the entry point.'
