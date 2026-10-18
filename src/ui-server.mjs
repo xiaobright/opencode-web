@@ -21,7 +21,15 @@
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
 import { basename, extname, join, resolve, sep } from "node:path"
-import { authorization, resolve as resolveService } from "./service.mjs"
+import { fileURLToPath } from "node:url"
+import { authorization } from "./service.mjs"
+import { createBackend } from "./backend.mjs"
+
+const sourceDir = fileURLToPath(new URL(".", import.meta.url))
+const loadingFiles = new Map([
+  ["/__opencode-web/loading.js", join(sourceDir, "loading.js")],
+  ["/__opencode-web/icon.ico", join(sourceDir, "../icons/opencode.ico")],
+])
 
 const PROXY_PATHS = ["/api", "/auth/", "/openapi.json"]
 
@@ -70,10 +78,10 @@ export function overlayScripts(overlayDir) {
     .map((name) => join(dir, name))
 }
 
-export function createUiServer({ overlayDir, log = () => {} }) {
+export function createUiServer({ overlayDir, log = () => {}, lazy = false, backend = createBackend({ log }) }) {
   const overlay = resolve(overlayDir)
 
-  return createServer((request, response) => {
+  return createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost")
 
     // Lets a second invocation of `bun run start` notice this server instead of starting another.
@@ -82,12 +90,39 @@ export function createUiServer({ overlayDir, log = () => {} }) {
         response,
         200,
         { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-        JSON.stringify({ ok: true, pid: process.pid }),
+        JSON.stringify({ ok: true, pid: process.pid, mode: lazy ? "lazy" : "normal", backend: backend.phase }),
       )
+
+    // Opening a page is the activation step; probes, icons and assets cannot
+    // start OpenCode. A same-origin POST from the loading page shares startup.
+    if (url.pathname === "/__opencode-web/start") {
+      if (request.method !== "POST") return void end(response, 405, { allow: "POST" })
+      if (request.headers.origin !== `http://${request.headers.host}` || request.headers["sec-fetch-site"] === "cross-site")
+        return void end(response, 403)
+      try {
+        await backend.start()
+        return void end(response, 200, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ ready: true }))
+      } catch (error) {
+        log(`no background service: ${error.message}`)
+        return void end(response, 503, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ ready: false }))
+      }
+    }
+
+    if (loadingFiles.has(url.pathname) && ["GET", "HEAD"].includes(request.method))
+      return void sendFile(request, response, loadingFiles.get(url.pathname))
 
     const isApi = PROXY_PATHS.some((prefix) => url.pathname === prefix || url.pathname.startsWith(prefix))
     const shell = isApi ? undefined : overlayShell(overlay)
     const inject = shell ? { styles: [], scripts: [] } : { styles: overlayStyles(overlay), scripts: overlayScripts(overlay) }
+
+    if (lazy && !isApi && request.method === "GET" && (request.headers.accept ?? "").includes("text/html")) {
+      // Paint immediately on a cold open, before even probing stale backend
+      // registrations. The loading page performs discovery/start in its POST.
+      if (backend.phase !== "ready") return void sendFile(request, response, join(sourceDir, "loading.html"))
+      const found = await backend.discover()
+      if (!found) return void sendFile(request, response, join(sourceDir, "loading.html"))
+      return void proxy(request, response, log, shell, inject, () => Promise.resolve(found))
+    }
 
     if (!isApi && (request.method === "GET" || request.method === "HEAD")) {
       const file = overlayFile(overlay, url.pathname)
@@ -99,14 +134,15 @@ export function createUiServer({ overlayDir, log = () => {} }) {
         return void end(response, 404, { "cache-control": "no-store" })
     }
 
-    return void proxy(request, response, log, shell, inject)
+    return void proxy(request, response, log, shell, inject, () => lazy ? backend.discover() : backend.start())
   })
 }
 
-async function proxy(request, response, log, shell, overlay) {
+async function proxy(request, response, log, shell, overlay, resolveBackend) {
   let service
   try {
-    service = await resolveService({ onStart: () => log("starting the opencode background service") })
+    service = await resolveBackend()
+    if (!service) return void end(response, 503, { "content-type": "text/plain; charset=utf-8", "retry-after": "1" }, "OpenCode is not running. Open the web UI to start it.\n")
   } catch (error) {
     log(`no background service: ${error.message}`)
 

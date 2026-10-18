@@ -10,11 +10,13 @@
 #
 # -NoBrowser  do not open the browser on start (used when spawned by the opencode hook)
 # -NoService  do not start the opencode service, only follow one that is already running
+# -Lazy       keep the tray and gateway resident; no browser or backend until page open
 
 param(
   [int]$Port = 0,
   [switch]$NoBrowser,
-  [switch]$NoService
+  [switch]$NoService,
+  [switch]$Lazy
 )
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -126,11 +128,18 @@ function Start-Web {
   $info = New-Object System.Diagnostics.ProcessStartInfo
   $info.FileName = $bun
   $info.Arguments = "run `"$Root\src\start.mjs`" --no-open --port $Port"
+  if ($Lazy -or $NoService) { $info.Arguments += " --lazy" }
   $info.WorkingDirectory = $Root
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $state.Web = [System.Diagnostics.Process]::Start($info)
   Write-Log "started the web UI (pid $($state.Web.Id))"
+  # Wait for the gateway listener only; the backend is never needed here.
+  for ($attempt = 0; $attempt -lt 50; $attempt++) {
+    if (Test-Web) { return }
+    if ($state.Web.HasExited) { Write-Log "the web UI exited before listening"; return }
+    Start-Sleep -Milliseconds 100
+  }
 }
 
 function Stop-Web {
@@ -190,6 +199,24 @@ $icon.add_MouseClick({
   })
 
 function Update-Tray {
+  if ($Lazy) {
+    # The gateway is the resident process in standby mode, so a stopped backend
+    # must not remove its entry point. Read gateway metadata, without a probe
+    # that starts or connects to the backend.
+    try {
+      $gateway = Invoke-RestMethod -Uri "${WebUrl}__opencode-web" -TimeoutSec 2
+      $icon.Text = switch ($gateway.backend) {
+        "starting" { "OpenCode · 正在启动" }
+        "ready" { "OpenCode · 点击打开网页" }
+        "error" { "OpenCode · 启动失败，点击重试" }
+        default { "OpenCode · 待用，点击启动" }
+      }
+    } catch {
+      $icon.Text = "OpenCode · 待用，点击打开"
+    }
+    $icon.Visible = $true
+    return
+  }
   $found = Find-Service
   if ($found) {
     if ($state.Failures -gt 2) { Write-Log "the service is back at $($found.Info.url)" }
@@ -210,7 +237,7 @@ function Update-Tray {
 
 Write-Log "starting (port $Port, service-start $(-not $NoService))"
 
-if (-not (Find-Service) -and -not $NoService) {
+if (-not $Lazy -and -not (Find-Service) -and -not $NoService) {
   Write-Log "no service running; starting one"
   Invoke-Cli @("service", "start")
   for ($attempt = 0; $attempt -lt 30 -and -not (Find-Service); $attempt++) { Start-Sleep -Milliseconds 500 }
@@ -218,7 +245,7 @@ if (-not (Find-Service) -and -not $NoService) {
 
 Update-Tray
 
-if (-not $NoBrowser) { Open-Web } else { Start-Web }
+if ($Lazy -or $NoBrowser) { Start-Web } else { Open-Web }
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000

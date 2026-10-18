@@ -5,6 +5,8 @@
 //   bun run start                      start and open the browser
 //   bun run start -- --port 8080       another port
 //   bun run start -- --no-open         do not open a browser
+//   bun run start -- --lazy            gateway only; backend starts on page open
+//   bun run start -- --lazy --open     show the loading page and start on demand
 //
 // Running it twice does not start a second server: the second run opens the browser and exits.
 
@@ -13,7 +15,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createUiServer, overlayScripts, overlayStyles } from "./ui-server.mjs"
-import * as Service from "./service.mjs"
+import { createBackend } from "./backend.mjs"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const overlayDir = join(root, "webui")
@@ -27,7 +29,8 @@ const option = (name, fallback) => {
 }
 
 const port = Number(option("port", process.env.OPENCODE_WEB_PORT ?? 53123))
-const shouldOpen = !args.includes("--no-open")
+const lazy = args.includes("--lazy")
+const shouldOpen = !args.includes("--no-open") && (!lazy || args.includes("--open"))
 
 const running = await probe(`http://127.0.0.1:${port}/__opencode-web`)
 if (running) {
@@ -36,7 +39,8 @@ if (running) {
   process.exit(0)
 }
 
-const server = createUiServer({ overlayDir, log })
+const backend = createBackend({ log })
+const server = createUiServer({ overlayDir, log, lazy, backend })
 const address = await listen(server, port)
 const url = `http://127.0.0.1:${address}/`
 
@@ -57,12 +61,16 @@ log(
       : "webui/ has nothing to apply; serving the UI as the opencode service ships it",
 )
 
-try {
-  const service = await Service.resolve({ onStart: () => log("starting the opencode background service") })
-  log(`opencode ${service.info?.version ?? service.version} at ${service.url}`)
-} catch (error) {
-  log(`no background service yet: ${error.message}`)
-  log("the UI will connect as soon as one is available")
+if (lazy) {
+  log("standby: the gateway is ready; OpenCode starts when the web UI is opened")
+} else {
+  try {
+    const service = await backend.start()
+    log(`opencode ${service.info?.version ?? service.version} at ${service.url}`)
+  } catch (error) {
+    log(`no background service yet: ${error.message}`)
+    log("the UI will connect as soon as one is available")
+  }
 }
 
 if (shouldOpen) openBrowser(url)

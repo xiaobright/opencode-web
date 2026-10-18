@@ -7,6 +7,7 @@
   "scripts": {
     "start": "bun run src/start.mjs",
     "tray": "bun run scripts/tray.mjs",
+    "standby": "bun run scripts/tray.mjs --lazy",
     "install-hook": "bun run scripts/install-hook.mjs",
     "uninstall-hook": "bun run scripts/install-hook.mjs --uninstall"
   }

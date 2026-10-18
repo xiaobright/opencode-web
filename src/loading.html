@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCode · 正在加载</title>
+  <link rel="icon" href="/__opencode-web/icon.ico">
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, "Microsoft YaHei UI", sans-serif; background: #fff; color: #18181b; }
+    body { min-height: 100dvh; margin: 0; display: grid; place-items: center; }
+    main { width: min(360px, calc(100% - 48px)); text-align: center; }
+    .brand { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 28px; }
+    .brand img { width: 56px; height: 56px; }
+    h1 { font-size: 30px; font-weight: 650; letter-spacing: -.8px; margin: 0; }
+    .status { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 24px; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #d4d4d8; border-top-color: #52525b; border-radius: 50%; animation: spin 1s linear infinite; }
+    p { color: #71717a; font-size: 13px; line-height: 1.6; margin: 14px 0 0; }
+    button { font: inherit; color: inherit; background: transparent; border: 1px solid #a1a1aa; border-radius: 8px; padding: 8px 18px; margin-top: 22px; cursor: pointer; }
+    button:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }
+    [hidden] { display: none !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) { :root { background: #1c1c1f; color: #ededf0; } p { color: #9d9da6; } .spinner { border-color: #3f3f46; border-top-color: #d4d4d8; } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+  </style>
+  <script src="/__opencode-web/loading.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="/__opencode-web/icon.ico" alt=""><h1>opencode</h1></div>
+    <div class="status" role="status"><span class="spinner" aria-hidden="true"></span><span id="status">正在加载…</span></div>
+    <p id="description">正在启动 OpenCode，稍后自动进入会话。</p>
+    <button id="retry" type="button" hidden>重试</button>
+    <noscript><p>请启用 JavaScript，再刷新页面以启动 OpenCode。</p></noscript>
+  </main>
+</body>
+</html>
