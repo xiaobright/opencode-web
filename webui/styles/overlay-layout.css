@@ -1,0 +1,40 @@
+/* 官方弹层通过 Portal 挂在页面外层，不会继承会话区的左侧留白。
+   和外壳共用 gutter，让它们以右侧可用区域为中心；遮罩仍覆盖整个窗口。
+   外壳层级为 40，低于官方弹层的 50，保留官方弹层之间的层级顺序。 */
+html:has(#ocw) {
+  --ocw-content-width: calc(100vw - var(--ocw-gutter, 0px));
+}
+
+html:has(#ocw) [data-dialog-layer] {
+  left: var(--ocw-gutter, 0px) !important; /* 官方层容器的 inset 是行内样式。 */
+}
+
+html:has(#ocw) :is([data-component="image-preview"], [data-component="dialog-v2"]) {
+  left: var(--ocw-gutter, 0px);
+}
+
+/* 小窗口的模型选择等使用底部抽屉，和会话区保持相同的左右边界。 */
+html:has(#ocw) [data-slot="mobile-drawer-content"] {
+  inset-inline-start: var(--ocw-gutter, 0px);
+}
+
+html:has(#ocw) [data-slot="image-preview-container"] {
+  width: min(calc(var(--ocw-content-width) - 32px), calc(var(--ocw-content-width) * .9), 1200px);
+}
+
+/* normal / large / x-large、命令面板和自定义宽度均保留原尺寸上限，
+   只有超过右侧可用区域时才缩小，避免窄窗口下被侧栏遮住或伸出窗口。 */
+html:has(#ocw) [data-component="dialog-v2"] [data-slot="dialog-container"] {
+  max-width: max(0px, calc(var(--ocw-content-width) - 32px));
+}
+
+/* 通知靠右定位，无需重新居中，但窄窗口下也要给左侧外壳留位。 */
+html:has(#ocw) .toast-v2-region {
+  max-width: max(0px, min(320px, calc(var(--ocw-content-width) - 64px)));
+}
+
+@media (max-width: 600px) {
+  html:has(#ocw) .toast-v2-region {
+    max-width: max(0px, calc(var(--ocw-content-width) - 32px));
+  }
+}

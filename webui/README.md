@@ -25,7 +25,7 @@
 - 官方外壳带 CSP（`style-src 'self' 'unsafe-inline'`），`/styles/*.css` 是同源，正常加载。
 - 只在**页面导航请求**（`Accept` 里含 `text/html`）上注入，并且会为这类请求去掉 `accept-encoding` 以便改写响应体；`/_assets/*` 的压缩和缓存都不受影响。
 - 如果 `webui/index.html` 也存在，它优先，而且**不再注入**：外壳换成你自己的，链什么由你决定。
-- 目前只有一个：`webui/styles/codex.css`（Codex 皮肤：观感 + 图标栏/侧栏的骨架样式 + 草稿屏那行提问 + 开草稿时的过渡遮罩）。移出这个目录就恢复官方外观，不用重启。
+- `webui/styles/codex.css` 提供 Codex 皮肤、图标栏/侧栏的骨架样式、草稿屏提问和过渡遮罩；`activity-status.css` 提供具体工作状态样式；`overlay-layout.css` 修正官方弹层相对右侧内容区的位置。
 
 ## 换个骨架：`webui/scripts/`
 
@@ -40,6 +40,14 @@
 - 外壳脚本是 `webui/scripts/codex-shell.js`，具体工作状态由下节介绍的两个活动状态脚本补充。外壳脚本做三件核心的事 —— 建 rail 和侧栏的 DOM（从 `/api/project` + `/api/session` 读列表，点会话时用 `history.pushState` + `popstate` 驱动官方路由）；**开一张官方草稿**（借 `mod+t` 键位触发官方的 `tab.new`，所以点「新聊天」不落库；顺带冷启动落 `/` 时转进草稿、草稿屏补一行 Codex 式提问、图标栏上加一颗明暗切换）；以及给事件流补上 `Accept: text/event-stream`（没有它官方界面用不了，见下）。**对话、消息渲染、工具卡片、diff、权限、终端全部仍是官方的**。
 
 > ⚠️ 这个脚本同时是一个**必要的兼容补丁**：官方 `request-queue.ts` 对 `/api/event` 直通时那个 `Request` 没有 `Accept` 头，本机 Chrome 只在 `Accept` 恰好是 `text/event-stream` 时才把该 MIME 的响应交给 `fetch`，于是事件流永远连不上 → 模型列表空、发送被拦、首页停在"加载中"。脚本顶部包了一层 `window.fetch` 专门给这个路径补 `Accept`。**所以移出 `webui/scripts/` 不只是丢外观，界面会退化成用不了**（只移 `webui/styles/` 则只丢外观）。细节见 `docs/codex-style-plan.md` 第五节。
+
+## 弹层布局
+
+官方图片预览和对话框通过 Portal 挂在页面外层，固定定位不会继承主区的左侧留白。`styles/overlay-layout.css` 复用 `--ocw-gutter`，让图片预览、通用对话框及命令面板在右侧可用区域居中，并限制宽度。小窗口底部抽屉也从右侧内容区开始，通知宽度给侧栏留位。侧栏层级为 40，低于官方弹层的 50，因此图片和浮层不会再被侧栏遮住，模态遮罩仍覆盖整个窗口。
+
+这些规则只在 `#ocw` 存在时生效，侧栏展开/收起和窗口缩放自动沿用相同的留白，无额外脚本或轮询。贴着按钮显示的菜单、下拉框和提示继续由官方定位，不额外平移。
+
+验证方法和覆盖范围见 `tests/overlays/README.md`：图片预览使用保存的官方 2.0.30 页面验证实际交互；其余弹层使用官方源码样式和结构检查布局。
 
 ## 具体工作状态
 

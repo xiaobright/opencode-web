@@ -28,4 +28,4 @@ createServer(async (request, response) => {
     const body = item.type.startsWith("text/html") ? item.body.toString("utf8").replace("</head>", styles.map((path) => `<link rel="stylesheet" href="/styles/${basename(path)}">`).join("") + "</head>").replace("</body>", scripts.map((path) => `<script src="/scripts/${basename(path)}"></script>`).join("") + "</body>") : item.body
     send(item.status, item.type, body)
   } catch (error) { send(502, "text/plain", error.message) }
-}).listen(53128, "127.0.0.1")
+}).listen(Number(process.env.OCW_TEST_PORT ?? 53128), "127.0.0.1")

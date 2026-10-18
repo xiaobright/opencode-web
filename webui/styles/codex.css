@@ -189,7 +189,7 @@
   top: 0;
   left: 0;
   bottom: 0;
-  z-index: 60;
+  z-index: 40;
   display: flex;
   font-family: var(--font-family-sans);
   font-size: 13px;
