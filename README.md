@@ -2,6 +2,8 @@
 
 给 opencode 后台服务配一个**本地网页入口**和一个**任务栏图标**。没有 Electron，没有第三方依赖，也不动 opencode 本身。
 
+社区个人项目，主要面向 Windows，并非 OpenCode 或 OpenAI 官方产品。当前正式入口保留官方时间线和工具折叠，未启用研究中的整轮折叠。已验证的官方 WebUI 版本为 OpenCode 2.0.30；升级后官方页面会随服务更新，自定义样式和 DOM 钩子的兼容性仍需检查。
+
 - 界面直接反代 opencode 自己那套 WebUI，**不带任何界面副本**，升级 opencode 自动跟着变。
 - 想改界面就往 `webui/` 里放文件，按路径覆盖官方资源，放一个换一个。
 - 默认图标跟着后台服务走；待用模式下图标和网页代理常驻，打开网页才启动后台。
@@ -33,6 +35,16 @@ opencode-web/
 零依赖，只要本机有 `bun` 和 `opencode`。
 
 ## 用法
+
+先安装 [Bun](https://bun.sh/) 和 [OpenCode](https://github.com/anomalyco/opencode)，确认终端中 `bun --version` 和 `opencode --version` 可用，再克隆本仓库：
+
+```powershell
+git clone https://github.com/xiaobright/opencode-web.git
+Set-Location opencode-web
+bun run standby
+```
+
+运行入口无需 `bun install`。默认仅监听 `127.0.0.1`，用于本机访问。
 
 | 想干什么 | 怎么做 |
 | --- | --- |
@@ -121,6 +133,8 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 
 另外，`webui/scripts/activity-model.js`、`activity-status.js` 和 `webui/styles/activity-status.css` 会根据已有事件，把通用“工作中”细化为思考、生成回答、工具执行或等待模型输出等状态。它不新增后台请求，也不改变时间线高度；[显示规则与验证方式](webui/README.md#具体工作状态)见覆盖层说明。
 
+`webui/styles/overlay-layout.css` 让图片预览和通用弹层相对右侧内容区定位，避免被左侧自定义栏位遮住。
+
 想恢复官方界面：把 `webui/styles/` 和 `webui/scripts/` 移出去，刷新即可，不用重启。注意**移出 `scripts/` 会一并失去那个 `Accept` 补丁**，界面会退化成用不了（只移 `styles/` 则只丢外观）。方案与取舍记在 `docs/codex-style-plan.md`。
 
 ## 注意
@@ -130,3 +144,13 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 - `sw.js` / `registerSW.js` 默认返回 404（除非你在 `webui/` 里自己放一个）：避免 Service Worker 预缓存住官方资源，导致覆盖层文件不生效。
 - 托盘用的是 Windows 自带 PowerShell（5.1 也能跑，脚本带 UTF-8 BOM），不依赖 Electron 或任何 npm 包。
 - `stop.cmd` 不会停 opencode 后台服务（TUI 和其它客户端还在用），需要时加 `--service`。
+
+## 测试与研究记录
+
+`tests/` 包含状态提示、弹层布局和按需启动验证；`research/` 和 `docs/` 保留折叠实验及上游 issue 记录，正式页面不会加载实验代码。研究中滚动位移仍非零，不能将原型视为已解决抖动的折叠功能。
+
+服务逻辑测试可在 `tests/startup` 运行 `bun test ./backend.test.mjs ./cli.test.mjs`。浏览器测试还需 OpenCode 源码的 Playwright 依赖，通过 `OPENCODE_SOURCE` 指定源码目录；详见各测试目录 README。状态/图片布局测试依赖本地保存的官方静态资源，长会话性能测试还依赖私人会话快照，这些忽略文件未上传，新克隆不能直接复现相关测试，仓库保留了汇总结果和验证范围。
+
+## 许可
+
+本项目采用 [MIT License](LICENSE)。OpenCode 图标和源码引用的归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
