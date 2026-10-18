@@ -1,0 +1,1173 @@
+{
+  "manifest": {
+    "version": "2.0.30",
+    "entry": "/_assets/index-DSXrPRcR.js",
+    "asset": "/_assets/route-Bm7Nm7t-.js",
+    "sha256": "a78015e20f722756818d02ac85641848a202e0afe2518bd51b09ac6db4280f66",
+    "bytes": 359099
+  },
+  "runs": [
+    {
+      "name": "baseline",
+      "stats": {
+        "startTime": "2026-10-17T11:25:47.095Z",
+        "duration": 9466.153,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "completed history: process content is restored by reactive expansion",
+          "status": "passed",
+          "durationMs": 1364
+        },
+        {
+          "title": "active turn remains unfolded",
+          "status": "passed",
+          "durationMs": 1304
+        },
+        {
+          "title": "long history: wheel displacement and visible row drift",
+          "status": "passed",
+          "durationMs": 4508
+        }
+      ],
+      "measurements": [
+        {
+          "mode": "baseline",
+          "maxAbsDrift": 83,
+          "samples": 28,
+          "observations": [
+            {
+              "step": 1,
+              "scrollDelta": 329,
+              "heightDelta": 47,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0052_research_assistant:msg_0052_research_assistant:text:1",
+                  "px": 56
+                }
+              ]
+            },
+            {
+              "step": 2,
+              "scrollDelta": 351,
+              "heightDelta": 11,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0051_research_assistant:prt_tool_51",
+                  "px": 42
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0051_research_assistant:msg_0051_research_assistant:text:1",
+                  "px": 42
+                }
+              ]
+            },
+            {
+              "step": 3,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0050_research_assistant:prt_tool_50",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0050_research_assistant:msg_0050_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 4,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0049_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0049_research_assistant:prt_tool_49",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 5,
+              "scrollDelta": 351,
+              "heightDelta": 47,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0048_research_assistant:prt_tool_48",
+                  "px": 78
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0048_research_assistant:msg_0048_research_assistant:text:1",
+                  "px": 78
+                }
+              ]
+            },
+            {
+              "step": 6,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0047_research_assistant:prt_tool_47",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 7,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0046_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0046_research_assistant:prt_tool_46",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 8,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0045_research_assistant:prt_tool_45",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 9,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0044_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0044_research_assistant:prt_tool_44",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 10,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0043_research_assistant:prt_tool_43",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline-metrics",
+      "stats": {
+        "startTime": "2026-10-17T11:32:28.710Z",
+        "duration": 7011.3949999999995,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "long history: wheel displacement and visible row drift",
+          "status": "passed",
+          "durationMs": 4652
+        }
+      ],
+      "measurements": [
+        {
+          "mode": "baseline",
+          "initial": {
+            "setupMs": 1186,
+            "mountedRows": 8,
+            "domNodes": 770,
+            "Nodes": 3656,
+            "LayoutCount": 0,
+            "RecalcStyleCount": 0,
+            "JSHeapUsedSize": 20367460
+          },
+          "maxAbsDrift": 83,
+          "samples": 28,
+          "observations": [
+            {
+              "step": 1,
+              "scrollDelta": 329,
+              "heightDelta": 47,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0052_research_assistant:msg_0052_research_assistant:text:1",
+                  "px": 56
+                }
+              ]
+            },
+            {
+              "step": 2,
+              "scrollDelta": 351,
+              "heightDelta": 11,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0051_research_assistant:prt_tool_51",
+                  "px": 42
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0051_research_assistant:msg_0051_research_assistant:text:1",
+                  "px": 42
+                }
+              ]
+            },
+            {
+              "step": 3,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0050_research_assistant:prt_tool_50",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0050_research_assistant:msg_0050_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 4,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0049_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0049_research_assistant:prt_tool_49",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 5,
+              "scrollDelta": 351,
+              "heightDelta": 47,
+              "drift": [
+                {
+                  "key": "assistant-part:context:context:msg_0048_research_assistant:prt_tool_48",
+                  "px": 78
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0048_research_assistant:msg_0048_research_assistant:text:1",
+                  "px": 78
+                }
+              ]
+            },
+            {
+              "step": 6,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0047_research_assistant:prt_tool_47",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 7,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0046_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0046_research_assistant:prt_tool_46",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 8,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0045_research_assistant:prt_tool_45",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            },
+            {
+              "step": 9,
+              "scrollDelta": 351,
+              "heightDelta": -61,
+              "drift": [
+                {
+                  "key": "user-message:msg_0044_research_user",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:0",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0044_research_assistant:prt_tool_44",
+                  "px": -30
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": -30
+                }
+              ]
+            },
+            {
+              "step": 10,
+              "scrollDelta": 248,
+              "heightDelta": 155,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:0",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:context:context:msg_0043_research_assistant:prt_tool_43",
+                  "px": 83
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:1",
+                  "px": 83
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "patched-final",
+      "stats": {
+        "startTime": "2026-10-17T11:29:30.388Z",
+        "duration": 9955.053,
+        "expected": 3,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "completed history: process content is restored by reactive expansion",
+          "status": "passed",
+          "durationMs": 1730
+        },
+        {
+          "title": "active turn remains unfolded",
+          "status": "passed",
+          "durationMs": 1351
+        },
+        {
+          "title": "long history: wheel displacement and visible row drift",
+          "status": "passed",
+          "durationMs": 4474
+        },
+        {
+          "title": "eager rendering falls back to virtualization above its row limit",
+          "status": "skipped",
+          "durationMs": 144
+        }
+      ],
+      "measurements": [
+        {
+          "mode": "patched",
+          "initial": {
+            "setupMs": 1028,
+            "mountedRows": 7,
+            "domNodes": 812,
+            "Nodes": 4374,
+            "LayoutCount": 0,
+            "RecalcStyleCount": 0,
+            "JSHeapUsedSize": 21010176
+          },
+          "maxAbsDrift": 185,
+          "samples": 20,
+          "observations": [
+            {
+              "step": 1,
+              "scrollDelta": 207,
+              "heightDelta": 77,
+              "drift": [
+                {
+                  "key": "user-message:msg_0049_research_user",
+                  "px": -36
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": -36
+                },
+                {
+                  "key": "turn-gap:msg_0050_research_user",
+                  "px": -36
+                },
+                {
+                  "key": "user-message:msg_0050_research_user",
+                  "px": -36
+                }
+              ]
+            },
+            {
+              "step": 2,
+              "scrollDelta": 351,
+              "heightDelta": 41,
+              "drift": [
+                {
+                  "key": "user-message:msg_0048_research_user",
+                  "px": 72
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0048_research_assistant:msg_0048_research_assistant:text:1",
+                  "px": 72
+                }
+              ]
+            },
+            {
+              "step": 3,
+              "scrollDelta": 207,
+              "heightDelta": 190,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:1",
+                  "px": 77
+                },
+                {
+                  "key": "turn-gap:msg_0047_research_user",
+                  "px": 77
+                }
+              ]
+            },
+            {
+              "step": 4,
+              "scrollDelta": 351,
+              "heightDelta": 41,
+              "drift": [
+                {
+                  "key": "turn-gap:msg_0045_research_user",
+                  "px": 72
+                },
+                {
+                  "key": "user-message:msg_0045_research_user",
+                  "px": 72
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:1",
+                  "px": 72
+                }
+              ]
+            },
+            {
+              "step": 5,
+              "scrollDelta": 351,
+              "heightDelta": 154,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:1",
+                  "px": 185
+                }
+              ]
+            },
+            {
+              "step": 6,
+              "scrollDelta": 351,
+              "heightDelta": 154,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0041_research_assistant:msg_0041_research_assistant:text:1",
+                  "px": 185
+                }
+              ]
+            },
+            {
+              "step": 7,
+              "scrollDelta": 207,
+              "heightDelta": 190,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0039_research_assistant:msg_0039_research_assistant:text:1",
+                  "px": 77
+                },
+                {
+                  "key": "turn-gap:msg_0040_research_user",
+                  "px": 77
+                }
+              ]
+            },
+            {
+              "step": 8,
+              "scrollDelta": 351,
+              "heightDelta": 41,
+              "drift": [
+                {
+                  "key": "turn-gap:msg_0038_research_user",
+                  "px": 72
+                },
+                {
+                  "key": "user-message:msg_0038_research_user",
+                  "px": 72
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0038_research_assistant:msg_0038_research_assistant:text:1",
+                  "px": 72
+                }
+              ]
+            },
+            {
+              "step": 9,
+              "scrollDelta": 351,
+              "heightDelta": 154,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0036_research_assistant:msg_0036_research_assistant:text:1",
+                  "px": 185
+                }
+              ]
+            },
+            {
+              "step": 10,
+              "scrollDelta": 351,
+              "heightDelta": 154,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0034_research_assistant:msg_0034_research_assistant:text:1",
+                  "px": 185
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "eager",
+      "stats": {
+        "startTime": "2026-10-17T11:27:05.309Z",
+        "duration": 11648.770999999999,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "completed history: process content is restored by reactive expansion",
+          "status": "passed",
+          "durationMs": 1747
+        },
+        {
+          "title": "active turn remains unfolded",
+          "status": "passed",
+          "durationMs": 1314
+        },
+        {
+          "title": "long history: wheel displacement and visible row drift",
+          "status": "passed",
+          "durationMs": 6269
+        }
+      ],
+      "measurements": [
+        {
+          "mode": "eager",
+          "maxAbsDrift": 0,
+          "samples": 34,
+          "observations": [
+            {
+              "step": 1,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0051_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0051_research_assistant:msg_0051_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 2,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0050_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0050_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0050_research_assistant:msg_0050_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 3,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0048_research_assistant:msg_0048_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0049_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0049_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 4,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0048_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0048_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 5,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0046_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0047_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 6,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0045_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0045_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 7,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0044_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0044_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 8,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0042_research_assistant:msg_0042_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0043_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0043_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 9,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0041_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0041_research_assistant:msg_0041_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0042_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 10,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0039_research_assistant:msg_0039_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0040_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0040_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0040_research_assistant:msg_0040_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "eager-final",
+      "stats": {
+        "startTime": "2026-10-17T11:30:22.245Z",
+        "duration": 13530.711000000001,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "completed history: process content is restored by reactive expansion",
+          "status": "passed",
+          "durationMs": 1799
+        },
+        {
+          "title": "active turn remains unfolded",
+          "status": "passed",
+          "durationMs": 1539
+        },
+        {
+          "title": "long history: wheel displacement and visible row drift",
+          "status": "passed",
+          "durationMs": 6334
+        },
+        {
+          "title": "eager rendering falls back to virtualization above its row limit",
+          "status": "passed",
+          "durationMs": 1392
+        }
+      ],
+      "measurements": [
+        {
+          "mode": "eager",
+          "initial": {
+            "setupMs": 2036,
+            "mountedRows": 179,
+            "domNodes": 3343,
+            "Nodes": 14365,
+            "LayoutCount": 0,
+            "RecalcStyleCount": 0,
+            "JSHeapUsedSize": 54141012
+          },
+          "maxAbsDrift": 0,
+          "samples": 34,
+          "observations": [
+            {
+              "step": 1,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0051_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0051_research_assistant:msg_0051_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 2,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0050_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0050_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0050_research_assistant:msg_0050_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 3,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0048_research_assistant:msg_0048_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0049_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0049_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0049_research_assistant:msg_0049_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 4,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0047_research_assistant:msg_0047_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0048_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0048_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 5,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0046_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0046_research_assistant:msg_0046_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0047_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 6,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0045_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0045_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0045_research_assistant:msg_0045_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 7,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0043_research_assistant:msg_0043_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0044_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0044_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0044_research_assistant:msg_0044_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 8,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0042_research_assistant:msg_0042_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0043_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0043_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 9,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "user-message:msg_0041_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0041_research_assistant:msg_0041_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0042_research_user",
+                  "px": 0
+                }
+              ]
+            },
+            {
+              "step": 10,
+              "scrollDelta": 320,
+              "heightDelta": 0,
+              "drift": [
+                {
+                  "key": "assistant-part:part:part:msg_0039_research_assistant:msg_0039_research_assistant:text:1",
+                  "px": 0
+                },
+                {
+                  "key": "turn-gap:msg_0040_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "user-message:msg_0040_research_user",
+                  "px": 0
+                },
+                {
+                  "key": "assistant-part:part:part:msg_0040_research_assistant:msg_0040_research_assistant:text:1",
+                  "px": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "incompatible",
+      "stats": {
+        "startTime": "2026-10-17T11:28:44.565Z",
+        "duration": 5169.947,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "tests": [
+        {
+          "title": "completed history: process content is restored by reactive expansion",
+          "status": "passed",
+          "durationMs": 1294
+        },
+        {
+          "title": "active turn remains unfolded",
+          "status": "passed",
+          "durationMs": 1434
+        }
+      ],
+      "measurements": []
+    }
+  ]
+}
