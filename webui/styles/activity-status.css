@@ -1,0 +1,13 @@
+/* 保持原状态行的高度，仅替换笼统提示；原生工具/权限提示仍由官方管理。 */
+[data-component="session-working"][data-ocw-activity] > :not(.ocw-activity-label) {
+  display: none !important;
+}
+.ocw-activity-label {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  color: var(--text-weak, inherit);
+}

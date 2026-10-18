@@ -104,6 +104,8 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 - `webui/scripts/codex-shell.js` —— 骨架：建出左边那条图标栏和「工作区 → 会话」侧栏，官方主区整体右移让位；列表读 `/api/project` 和 `/api/session`，点会话用 `history.pushState` + `popstate` 驱动官方路由；「新聊天」借官方 `mod+t` 键位开草稿（**点了不落库**，真正发送时官方才建会话），冷启动落 `/` 时也转进草稿；图标栏上一颗独立按钮切明暗。**对话、消息渲染、工具卡片、diff、权限、终端全部仍是官方的**，这里一个都没碰。
 - 另外，脚本顶部还有个**必要补丁**：给 `/api/event` 补上 `Accept: text/event-stream`。本机 Chrome 对 SSE 响应的 `Accept` 匹配很窄，没这个补丁官方事件流永远连不上，模型列表是空的、发送会被拦、首页停在"加载中"。
 
+另外，`webui/scripts/activity-model.js`、`activity-status.js` 和 `webui/styles/activity-status.css` 会根据已有事件，把通用“工作中”细化为思考、生成回答、工具执行或等待模型输出等状态。它不新增后台请求，也不改变时间线高度；[显示规则与验证方式](webui/README.md#具体工作状态)见覆盖层说明。
+
 想恢复官方界面：把 `webui/styles/` 和 `webui/scripts/` 移出去，刷新即可，不用重启。注意**移出 `scripts/` 会一并失去那个 `Accept` 补丁**，界面会退化成用不了（只移 `styles/` 则只丢外观）。方案与取舍记在 `docs/codex-style-plan.md`。
 
 ## 注意

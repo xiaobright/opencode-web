@@ -1,0 +1,82 @@
+import { test, expect } from "bun:test"
+import { runInNewContext } from "node:vm"
+const source = await Bun.file(new URL("../../webui/scripts/activity-model.js", import.meta.url)).text()
+function model() {
+  const window = {}
+  runInNewContext(source, { window })
+  return window.__ocwActivity
+}
+function send(state, type, data = {}, sessionID = "session-a") { state.accept({ type, data: { sessionID, ...data } }) }
+function text(state, id = "session-a") { return state.label(id)?.text }
+function snapshot() { return [{ id: "assistant", type: "assistant", time: { created: 1 }, content: [{ type: "tool", id: "read", name: "read", state: { status: "running" } }] }] }
+
+test("uses explicit phases; tool arguments are not execution; concurrent calls settle independently", () => {
+  const state = model()
+  expect(text(state)).toBeUndefined()
+  send(state, "session.execution.started")
+  expect(text(state)).toBe("等待模型输出")
+  send(state, "session.reasoning.started")
+  expect(text(state)).toBe("思考中")
+  send(state, "session.tool.input.started", { id: "one", name: "bash" })
+  expect(text(state)).toBe("准备工具调用")
+  send(state, "session.tool.called", { id: "one" })
+  expect(text(state)).toBe("执行命令中")
+  send(state, "session.tool.input.started", { id: "two", name: "read" })
+  send(state, "session.tool.called", { id: "two" })
+  expect(text(state)).toBe("执行工具中（2 项）")
+  send(state, "session.tool.success", { id: "one" })
+  expect(text(state)).toBe("读取文件中")
+  send(state, "session.tool.success", { id: "two" })
+  expect(text(state)).toBe("等待模型输出")
+  send(state, "session.text.delta", { delta: "answer" })
+  expect(text(state)).toBe("生成回答中")
+  send(state, "session.execution.succeeded")
+  expect(text(state)).toBeUndefined()
+})
+
+test("permission waits override tools, other sessions stay separate, disconnection clears stale activity", () => {
+  const state = model()
+  send(state, "session.tool.called", { id: "one" })
+  send(state, "permission.asked", { id: "permission" })
+  expect(text(state)).toBe("等待你的授权")
+  send(state, "session.reasoning.started", {}, "session-b")
+  expect(text(state, "session-b")).toBe("思考中")
+  expect(text(state)).toBe("等待你的授权")
+  send(state, "permission.replied", { requestID: "permission" })
+  expect(text(state)).toBe("执行工具中")
+  state.connection(false)
+  expect(text(state)).toBe("状态连接已断开")
+  state.connection(true)
+  expect(text(state)).toBeUndefined()
+})
+
+test("restores a running tool from existing messages without an old snapshot overwriting completion or a new event", () => {
+  const state = model()
+  const messages = snapshot()
+  state.seed("session-a", messages, state.version())
+  expect(text(state)).toBe("读取文件中")
+  const ticket = state.version()
+  send(state, "session.reasoning.started")
+  send(state, "session.tool.success", { id: "read" })
+  send(state, "session.text.started")
+  state.seed("session-a", messages, ticket)
+  expect(text(state)).toBe("生成回答中")
+  const next = state.version()
+  send(state, "session.execution.interrupted")
+  state.seed("session-a", messages, next)
+  expect(text(state)).toBeUndefined()
+  state.connection(true)
+  state.seed("session-a", messages, next)
+  expect(text(state)).toBeUndefined()
+})
+
+test("retry and compaction are distinct; tracking old sessions is bounded", () => {
+  const state = model()
+  send(state, "session.retry.scheduled")
+  expect(text(state)).toBe("等待重试")
+  send(state, "session.compaction.started")
+  expect(text(state)).toBe("整理上下文中")
+  for (let i = 0; i < 65; i++) send(state, "session.execution.started", {}, "background-" + i)
+  expect(text(state)).toBeUndefined()
+  expect(text(state, "background-64")).toBe("等待模型输出")
+})
