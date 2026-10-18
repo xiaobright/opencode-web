@@ -637,6 +637,8 @@
     }
 
     if (!shown) list.appendChild(message(filterText ? "没有匹配的会话" : "还没有会话"))
+
+    syncBusy()
   }
 
   function moreRow(groupId, remaining) {
@@ -657,6 +659,12 @@
     row.setAttribute("data-id", session.id)
     if (session.id === activeId) row.classList.add("is-active")
 
+    // 会话名左边留的 33px 空槽：会话在工作时这里放官方那颗像素格动画（见 progress-grid.js）。
+    // 节点常驻、由 data-busy 控制显隐，免得每次状态翻转都重建 DOM 打断动画。
+    var status = el("span", "ocw-session-status")
+    if (window.__ocwProgressGrid) status.appendChild(window.__ocwProgressGrid(14))
+    row.appendChild(status)
+
     var label = el("span", "ocw-session-title")
     label.textContent = session.title || "未命名会话"
     row.appendChild(label)
@@ -666,6 +674,18 @@
     })
 
     return row
+  }
+
+  /* ── 侧栏工作指示：activity-model 已经替我们盯着事件流，这里只按 sessionID 点灯。
+     订阅推送 + 350ms 轮询兜底（新渲染出的行、漏掉的终态都靠轮询自愈）。 ── */
+  function syncBusy() {
+    var activity = window.__ocwActivity
+    if (!activity || !ui) return
+    var rows = ui.list.querySelectorAll(".ocw-session[data-id]")
+    for (var i = 0; i < rows.length; i++) {
+      var busy = activity.busy(rows[i].getAttribute("data-id"))
+      rows[i].toggleAttribute("data-busy", busy)
+    }
   }
 
   function message(text) {
@@ -690,6 +710,7 @@
     setRailActive("settings", location.pathname === "/settings")
     syncThemeIcon()
     syncHero()
+    syncBusy()
   }
 
   function setRailActive(id, active) {
@@ -707,6 +728,10 @@
 
     build()
     void refresh()
+
+    // 活动状态推送一来就点灯/熄灯（activity-model.js 按文件名顺序先于本脚本加载）
+    if (window.__ocwActivity && typeof window.__ocwActivity.subscribe === "function")
+      window.__ocwActivity.subscribe(syncBusy)
 
     addEventListener("popstate", function () {
       syncActive()

@@ -49,6 +49,13 @@
     if (type === "permission.replied") state.permissions.delete(data.requestID)
     notify()
   }
+  // 侧栏的像素格动画只看这个：有状态且不在收尾态就亮。断线时一律视为空闲，
+  // 否则恢复前所有行都会闪。idle 的状态留在表里只为节流，不算忙。
+  function busy(id) {
+    if (!id || disconnected) return false
+    var state = sessions.get(id)
+    return !!state && state.phase !== "idle"
+  }
   function label(id) {
     if (!id) return null
     if (disconnected) return { text: "状态连接已断开", title: "尚未恢复实时状态，不能确认任务当前阶段。" }
@@ -93,7 +100,7 @@
     notify()
   }
   window.__ocwActivity = {
-    accept: accept, label: label, seed: seed,
+    accept: accept, label: label, seed: seed, busy: busy,
     version: function () { return version },
     subscribe: function (listener) { listeners.add(listener); return function () { listeners.delete(listener) } },
     connection: function (connected) { sessions.clear(); resetVersion = ++version; disconnected = !connected; notify() },

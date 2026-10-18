@@ -61,6 +61,8 @@
 
 这层只替换官方通用状态行中的文字，保留原高度和可访问的 `role="status"`。官方显示更具体的工具卡片、权限或错误提示时，仍采用官方的显示规则；不会强行额外插入一条状态行。缺少可判断的数据时保留官方提示。收到思考开始后，若上游一直不发后续状态，也无法仅凭前端知道它是否卡住。
 
+侧栏里的会话行也吃同一份状态：`scripts/progress-grid.js` 复刻官方的「像素格」工作动画（`SessionProgressIndicatorV2`，36 帧 @30fps 的 16×16 APNG，经 `feFlood`+`feComposite` 用 `currentColor` 染色、5×5 方块 `clipPath` 裁边）。滤镜/裁剪/图片数据全文档只挂一份 defs，每行会话只放一个 `<use>` 引用；`codex-shell.js` 依据 `activity-model.js` 暴露的 `busy(sessionID)` 给行切换 `data-busy`，动画节点常驻、由 CSS 控制显隐。系统开启「减少动态效果」时退化为官方同款的静止中心点。
+
 刷新网页即可加载这些文件，无需重启后台。移除这三个活动状态文件即可停用此功能；保留 `codex-shell.js` 中原有的 SSE Accept 兼容补丁。
 
 本地验证：在 `tests/activity` 目录运行 `bun test ./model.test.mjs` 和 `bun run run.mjs`。浏览器检查使用已保留的 2.0.30 静态资源快照与官方事件夹具，独立端口 53128；不启动后台或调用真实模型。状态流的原字节、错误和取消继续传给官方客户端。首批消息兼容 `response.json()` 和 `response.text()`：当前 SDK 使用后者，因此会额外解析一次这批 JSON，读取元数据后立即释放，不再读取或复制响应流。
