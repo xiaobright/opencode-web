@@ -86,8 +86,11 @@ export async function createSession({ title, directory, model, agent, permission
   return body.data
 }
 
-export async function prompt(sessionID, text) {
-  const body = await request(sessionPath(sessionID, "/prompt"), { method: "POST", body: { text } })
+export async function prompt(sessionID, text, { delivery } = {}) {
+  const body = await request(sessionPath(sessionID, "/prompt"), {
+    method: "POST",
+    body: { text, ...(delivery ? { delivery } : {}) },
+  })
   return body.data
 }
 
@@ -100,6 +103,25 @@ export async function messages(sessionID, limit = 100) {
 export async function sessionInfo(sessionID) {
   const body = await request(sessionPath(sessionID))
   return body.data
+}
+
+/** One-line summary of a session diff, shared with the test fixture. */
+export function summarizeDiff(files) {
+  const list = Array.isArray(files) ? files : []
+  const additions = list.reduce((sum, file) => sum + (Number(file.additions) || 0), 0)
+  const deletions = list.reduce((sum, file) => sum + (Number(file.deletions) || 0), 0)
+  const names = list
+    .slice(0, 3)
+    .map((file) => String(file.file ?? "").replaceAll("\\", "/").split("/").pop())
+    .filter(Boolean)
+    .join(", ")
+  return { count: list.length, additions, deletions, names }
+}
+
+/** Files this session changed so far, as a one-line summary for progress reports. */
+export async function diff(sessionID) {
+  const body = await request(sessionPath(sessionID, "/diff"))
+  return summarizeDiff(Array.isArray(body?.data) ? body.data : [])
 }
 
 export async function activeSessions() {

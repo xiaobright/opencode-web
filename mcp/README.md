@@ -16,7 +16,7 @@
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
-| `opencode_delegate` | `task*`、`directory` | 开一个全新会话把任务交出去。短任务直接返回答案；还在跑就返回 `session_id` |
+| `opencode_delegate` | `task*`、`directory`、`plan` | 开一个全新会话把任务交出去。短任务直接返回答案；还在跑就返回 `session_id`。`plan: true` 只出计划、等确认 |
 | `opencode_session` | `action*`、`session_id*`、`text` | `status` / `wait` / `message` / `cancel` |
 
 **模型、权限、调用方标识、标题都不在参数里**：这些是服务端（运营者）的决定，调用方不需要知道用哪个免费模型、额度怎么算，也不需要选 agent。
@@ -27,6 +27,39 @@
 - `wait` 每次最多等 60 秒；超时只表示等待预算用完，会话继续跑，再调一次即可。
 - `message` 往同一个会话追加指令并等回复（默认 60 秒），只返回这一问的增量。
 - `cancel` 只中断当前回合，会话和文件都保留。
+
+## 工作协议（让 status 有东西可抓）
+
+opencode V2 移除了 `todowrite`（v1 迁移里的 `REMOVED_TOOLS`），所以协议不走工具，走纯文本：
+
+- 派活时在任务前面附一段 `[Delegation protocol]`：**调用任何工具之前**先输出一行 `plan: 1) … 2) …`；
+- 每完成一步、开始下一步之前，输出一行 `progress: n/N <做了什么> -> <下一步>`；
+- 当前版本如果有 todo 工具就同步过去；没有就不要去找（避免模型把回合浪费在搜索不存在的工具上）。
+
+`status`、`wait` 超时、`delegate` 超时返回同一块进度：
+
+```
+Session ses_x · running · 1m12s
+Plan: 1) 读代码 · 2) 改代码 · 3) 跑测试
+Now: shell "npm test" (running)
+Progress: 2/3 改完了 -> 跑测试
+Files: 2 changed +31 −4 (a.js, b.js)
+```
+
+- 模型沉默超过 `OPENCODE_MCP_SILENT_MS`（默认 60s）时，下一次 `wait` / `delegate` 会追加一条 **steer 提醒**：它作为用户消息落在当前回合的下一个 step 边界，不会多开一轮；每个会话最多每 `OPENCODE_MCP_NUDGE_MS`（默认 90s）一次；
+- `plan:` / `progress:` 行只进 status，最终答复里会被剥掉；
+- 解析时也会看 `reasoning`（只取匹配到的 plan/progress 行），推理模型把计划写在思考里也能抓到；
+- 关掉协议：`OPENCODE_MCP_PROTOCOL=off`。
+
+### 计划模式
+
+`opencode_delegate { task, plan: true }` 只出计划不干活：
+
+1. 模型先回一行 `plan:` 加一句假设/风险，然后停下；
+2. 调用方确认：`opencode_session action="message" text="approved, go ahead"`（改步骤就发改后的），不想做就 `cancel`；
+3. 确认后按普通协议执行并汇报 `progress:`。
+
+简单活不传 `plan`，直接开干——走不走计划由调用方（主模型）自己判断。计划模式下的 `plan:` 行会保留在返回里（那是你要审的东西），执行阶段的 `plan/progress` 行仍会被剥出最终答复。
 
 ## 模型怎么选
 
@@ -57,6 +90,9 @@
 | `OPENCODE_MCP_DELEGATE_WAIT_MS` | 派活后先等多久，默认 20000 |
 | `OPENCODE_MCP_WAIT_MS` | 单次 `wait` / `message` 的等待预算，默认 60000 |
 | `OPENCODE_MCP_MAX_CHARS` | 单次返回正文上限，默认 8000 |
+| `OPENCODE_MCP_PROTOCOL` | 设为 `off` 关掉 plan/progress 工作协议与提醒 |
+| `OPENCODE_MCP_SILENT_MS` | 多久没动静算沉默，默认 60000 |
+| `OPENCODE_MCP_NUDGE_MS` | 同一会话两次提醒的最小间隔，默认 90000 |
 | `OPENCODE_BIN` | 透传给服务发现层，指定 opencode 可执行文件 |
 
 ## 测试

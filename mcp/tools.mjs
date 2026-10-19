@@ -6,9 +6,14 @@
 // Nothing here leaks how the delegation is wired. Model choice, permissions, caller
 // identity and the title are server-side decisions (environment), not parameters —
 // a caller has no way to know which free model is good today, and does not need to.
+//
+// Delegated sessions get a working agreement: a plan line, then one progress line per
+// step. That is what status/wait report back, and what the reminder nudges when the
+// agent goes quiet. opencode V2 removed the todo tool, so the protocol is plain text.
 
 import { normalizeDirectory } from "./opencode.mjs"
 import { deriveTitle, formatAge, lastAssistantText, readOutput, stateFromMessages } from "./tasks.mjs"
+import { AGREEMENT, PLAN_AGREEMENT, REMINDER, formatDuration, isSilent, renderProgress } from "./progress.mjs"
 import { rankingPath, readRanking, selectModel } from "../src/models.mjs"
 
 // Sessions created here carry this metadata origin, which is how the web UI and the tray
@@ -29,9 +34,12 @@ function settings(env) {
     // sessions into whatever directory the MCP client happened to spawn the server in.
     directory: env.OPENCODE_MCP_DIRECTORY || "",
     caller: env.OPENCODE_MCP_CALLER || "mcp",
+    protocol: env.OPENCODE_MCP_PROTOCOL !== "off",
     delegateWaitMs: number("OPENCODE_MCP_DELEGATE_WAIT_MS", 20_000),
     waitMs: number("OPENCODE_MCP_WAIT_MS", 60_000),
     maxChars: number("OPENCODE_MCP_MAX_CHARS", 8_000),
+    silentMs: number("OPENCODE_MCP_SILENT_MS", 60_000),
+    nudgeMs: number("OPENCODE_MCP_NUDGE_MS", 90_000),
   }
 }
 
@@ -76,6 +84,7 @@ function withBody(line, text, truncated) {
 
 export function createTools({ api, env = process.env } = {}) {
   const config = settings(env)
+  const nudges = new Map()
 
   // The model is an operator decision: OPENCODE_MCP_MODEL pins one, otherwise the web
   // UI's ranking decides, otherwise the first free tool-capable model in the catalog.
@@ -86,19 +95,60 @@ export function createTools({ api, env = process.env } = {}) {
     return { providerID: chosen.providerID, id: chosen.id }
   }
 
-  async function currentState(sessionID, completed) {
-    if (completed) return "done"
+  /** State and messages in one read; `completed` skips the active probe. */
+  async function snapshot(sessionID, completed, limit = 40) {
+    const messages = await api.messages(sessionID, limit)
+    // A finished wait still has to read the idle marker: it carries done / failed / cancelled.
+    if (completed) return { state: stateFromMessages(messages, { active: false }), messages }
     const active = await api.activeSessions().catch(() => new Set())
-    const messages = await api.messages(sessionID, 20)
-    return stateFromMessages(messages, { active: active.has(sessionID) })
+    return { state: stateFromMessages(messages, { active: active.has(sessionID) }), messages }
+  }
+
+  function elapsedOf(messages) {
+    const oldest = messages[messages.length - 1]?.time?.created
+    return typeof oldest === "number" ? Date.now() - oldest : undefined
+  }
+
+  /** Session header plus the plan / current step / progress / files block. */
+  async function progressText(sessionID, state, messages) {
+    const elapsed = elapsedOf(messages)
+    const files = await api.diff(sessionID).catch(() => undefined)
+    const block = renderProgress({ messages, files, state })
+    return [head(sessionID, state, elapsed === undefined ? undefined : formatDuration(elapsed)), block].filter(Boolean).join("\n")
+  }
+
+  /**
+   * The only channel a subagent can reach the caller through is the tool result the
+   * caller is blocked on, so a reminder is a mid-run steer: it lands at the next step
+   * boundary, never as an extra turn. Rate limited per session.
+   */
+  async function nudgeIfSilent(sessionID, state, messages) {
+    if (!config.protocol || state !== "running") return false
+    if (!isSilent({ messages, thresholdMs: config.silentMs })) return false
+    const last = nudges.get(sessionID) ?? 0
+    if (Date.now() - last < config.nudgeMs) return false
+    nudges.set(sessionID, Date.now())
+    try {
+      await api.prompt(sessionID, REMINDER, { delivery: "steer" })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function runningReport(sessionID, messages, state, nudged) {
+    const text = await progressText(sessionID, state, messages)
+    return `${text}\n\nStill running${nudged ? " (progress reminder sent)" : ""}; call action="wait" again to keep waiting.`
   }
 
   /* ── opencode_delegate ───────────────────────────────────────────────── */
 
   async function delegate(args = {}) {
     const tool = "opencode_delegate"
-    rejectUnexpected(args, ["task", "directory"], tool)
+    rejectUnexpected(args, ["task", "directory", "plan"], tool)
     const task = requireString(args, "task", tool)
+    if (args.plan !== undefined && typeof args.plan !== "boolean") fail(tool, "parameter \"plan\" must be a boolean.")
+    const plan = args.plan === true
     const directory = normalizeDirectory(
       optionalString(args, "directory") ||
         config.directory ||
@@ -111,18 +161,34 @@ export function createTools({ api, env = process.env } = {}) {
       directory,
       model,
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
-      metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller },
+      metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller, ...(plan ? { plan: true } : {}) },
     })
-    await api.prompt(session.id, task)
+    const preamble = config.protocol ? (plan ? PLAN_AGREEMENT : AGREEMENT) : undefined
+    await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
 
     // A short wait makes a quick task a single round-trip; anything longer becomes a
     // session to poll, which is the normal way to talk to a subagent.
     const waited = await api.wait(session.id, config.delegateWaitMs)
-    if (!waited.completed)
+    if (plan && waited.completed) {
+      const messages = await api.messages(session.id, 100)
       return {
-        text: `${head(session.id, "running")}\n\nContinue: opencode_session action="wait" session_id="${session.id}"`,
-        structured: { session_id: session.id, state: "running" },
+        text: [
+          head(session.id, "planned", `${(waited.waitedMs / 1000).toFixed(1)}s`),
+          lastAssistantText(messages) || "(no plan returned)",
+          `Approve: opencode_session action="message" session_id="${session.id}" text="approved, go ahead"`,
+          "Adjust: send the corrected steps the same way, or action=\"cancel\" to drop it.",
+        ].join("\n\n"),
+        structured: { session_id: session.id, state: "planned", plan: true },
       }
+    }
+    if (!waited.completed) {
+      const { state, messages } = await snapshot(session.id, false, 40)
+      const nudged = await nudgeIfSilent(session.id, state, messages)
+      return {
+        text: `${await runningReport(session.id, messages, state, nudged)}\n\nTip: session_id="${session.id}"`,
+        structured: { session_id: session.id, state },
+      }
+    }
 
     const messages = await api.messages(session.id, 100)
     const output = readOutput(messages, { maxChars: config.maxChars })
@@ -141,60 +207,51 @@ export function createTools({ api, env = process.env } = {}) {
     const sessionID = requireString(args, "session_id", tool)
 
     if (action === "status") {
-      const messages = await api.messages(sessionID, 20)
-      const active = await api.activeSessions().catch(() => new Set())
-      const state = stateFromMessages(messages, { active: active.has(sessionID) })
+      const { state, messages } = await snapshot(sessionID, false, 40)
       const updated = messages[0]?.time?.created ?? 0
-      const detail = updated ? `${formatAge(updated)} ago` : undefined
+      const text = await progressText(sessionID, state, messages)
       return {
-        text: withBody(head(sessionID, state, detail), lastAssistantText(messages)),
-        structured: { session_id: sessionID, state, text: lastAssistantText(messages) },
+        text: [text, updated ? `Last update ${formatAge(updated)} ago` : ""].filter(Boolean).join("\n"),
+        structured: { session_id: sessionID, state },
       }
     }
 
-    if (action === "wait") {
-      const waited = await api.wait(sessionID, config.waitMs)
-      const messages = await api.messages(sessionID, 100)
-      const state = await currentState(sessionID, waited.completed)
-      if (!waited.completed)
-        return {
-          text: `${head(sessionID, state)}\n\nStill running; call action="wait" again to keep waiting.`,
-          structured: { session_id: sessionID, state, waited_ms: waited.waitedMs },
-        }
-      const output = readOutput(messages, { maxChars: config.maxChars })
-      return {
-        text: withBody(head(sessionID, state, `waited ${(waited.waitedMs / 1000).toFixed(1)}s`), output.text, output.truncated),
-        structured: { session_id: sessionID, state, text: output.text, truncated: output.truncated, waited_ms: waited.waitedMs },
+    if (action === "wait" || action === "message") {
+      let cursor
+      if (action === "message") {
+        const text = requireString(args, "text", tool)
+        // Read the boundary first so the reply is the delta, not the previous turn.
+        const before = await api.messages(sessionID, 1)
+        cursor = before[0]?.id
+        await api.prompt(sessionID, text)
       }
-    }
 
-    if (action === "message") {
-      const text = requireString(args, "text", tool)
-      // Read the boundary first so the reply is the delta, not the previous turn.
-      const before = await api.messages(sessionID, 1)
-      const cursor = before[0]?.id
-      await api.prompt(sessionID, text)
       const waited = await api.wait(sessionID, config.waitMs)
-      const messages = await api.messages(sessionID, 100)
-      const state = await currentState(sessionID, waited.completed)
-      if (!waited.completed)
+      if (!waited.completed) {
+        const { state, messages } = await snapshot(sessionID, false, 40)
+        const nudged = await nudgeIfSilent(sessionID, state, messages)
         return {
-          text: `${head(sessionID, state)}\n\nStill running; call action="wait" again to keep waiting.`,
+          text: await runningReport(sessionID, messages, state, nudged),
           structured: { session_id: sessionID, state, waited_ms: waited.waitedMs },
         }
+      }
+
+      const messages = await api.messages(sessionID, 100)
       const output = readOutput(messages, { cursor, maxChars: config.maxChars })
       return {
-        text: withBody(head(sessionID, state, `waited ${(waited.waitedMs / 1000).toFixed(1)}s`), output.text, output.truncated),
-        structured: { session_id: sessionID, state, text: output.text, truncated: output.truncated, waited_ms: waited.waitedMs },
+        text: withBody(
+          head(sessionID, "done", `waited ${(waited.waitedMs / 1000).toFixed(1)}s`),
+          output.text,
+          output.truncated,
+        ),
+        structured: { session_id: sessionID, state: "done", text: output.text, truncated: output.truncated, waited_ms: waited.waitedMs },
       }
     }
 
     // cancel
     await api.interrupt(sessionID)
     const waited = await api.wait(sessionID, 15_000)
-    const messages = await api.messages(sessionID, 20)
-    const active = waited.completed ? false : (await api.activeSessions().catch(() => new Set())).has(sessionID)
-    const state = stateFromMessages(messages, { active })
+    const { state } = await snapshot(sessionID, waited.completed, 20)
     return {
       text: head(sessionID, state),
       structured: { session_id: sessionID, state },
@@ -205,12 +262,13 @@ export function createTools({ api, env = process.env } = {}) {
     opencode_delegate: {
       title: "Delegate a task",
       description:
-        "Run one task in a fresh opencode session. Returns the answer, or the session id while it is still running.",
+        "Run one task in a fresh opencode session. Returns the answer, or the session id and its progress while it is still running.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "The complete instruction for the agent." },
           directory: { type: "string", description: "Working directory for the task." },
+          plan: { type: "boolean", description: "Plan first: return a plan and wait for your approval before doing the work." },
         },
         required: ["task"],
         additionalProperties: false,

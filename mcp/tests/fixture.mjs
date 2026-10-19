@@ -42,9 +42,9 @@ export const DEFAULT_MODELS = [
   },
 ]
 
-export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, models = DEFAULT_MODELS } = {}) {
+export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, models = DEFAULT_MODELS, progressMode = false, diffFiles = [] } = {}) {
   const sessions = new Map()
-  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0 }
+  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, promptTexts: [], deliveries: [] }
   const waiters = new Map()
 
   function settle(session, outcome) {
@@ -123,9 +123,24 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
       request.on("end", () => {
         const input = JSON.parse(body || "{}")
         session.turns++
+        state.promptTexts.push(input.text)
+        state.deliveries.push(input.delivery ?? null)
         session.messages.push({ id: `msg_${randomUUID()}`, type: "user", time: { created: Date.now() }, text: input.text })
         session.running = true
         state.prompts++
+        if (progressMode && session.turns === 1) {
+          // A running step: plan, progress line and an in-flight tool, before the reply lands.
+          const started = Date.now()
+          session.messages.push({
+            id: `msg_${randomUUID()}`,
+            type: "assistant",
+            time: { created: started },
+            content: [
+              { type: "text", text: "plan: 1) 读代码 2) 改代码 3) 跑测试\nprogress: 1/3 读完入口 -> 修改实现" },
+              { type: "tool", name: "shell", state: { status: "running", input: { command: "npm test" } }, time: { created: started } },
+            ],
+          })
+        }
         setTimeout(() => settle(session, "succeeded"), replyDelayMs)
         json(200, { data: { id: "inbox" } })
       })
@@ -149,6 +164,8 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
       settle(session, "interrupted")
       return json(200, { data: { ok: true } })
     }
+
+    if (request.method === "GET" && url.pathname.endsWith("/diff")) return json(200, { data: diffFiles })
 
     if (request.method === "GET" && url.pathname.endsWith("/message")) {
       const limit = Number(url.searchParams.get("limit") ?? 20)
@@ -200,7 +217,8 @@ export function fixtureApi(module, url) {
     // the location the session API expects.
     createSession: async (input) =>
       (await call("/api/session", { method: "POST", body: { ...input, location: input.location ?? { directory: input.directory } } })).data,
-    prompt: async (sessionID, text) => (await call(`/api/session/${sessionID}/prompt`, { method: "POST", body: { text } })).data,
+    prompt: async (sessionID, text, options = {}) =>
+      (await call(`/api/session/${sessionID}/prompt`, { method: "POST", body: { text, ...(options.delivery ? { delivery: options.delivery } : {}) } })).data,
     messages: async (sessionID, limit = 100) => (await call(`/api/session/${sessionID}/message?limit=${limit}`)).data,
     sessionInfo: async (sessionID) => (await call(`/api/session/${sessionID}`)).data,
     activeSessions: async () => new Set(Object.keys((await call("/api/session/active")).data)),
@@ -216,5 +234,6 @@ export function fixtureApi(module, url) {
       }
     },
     catalog: async () => (await call("/api/model")).data.map(module.normalizeModel),
+    diff: async (sessionID) => module.summarizeDiff((await call(`/api/session/${sessionID}/diff`)).data),
   }
 }

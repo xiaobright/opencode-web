@@ -4,6 +4,8 @@
 // a session already lives in the background service, outlives this MCP process, and
 // shows up in the web UI, so a second handle would only be something to lose.
 
+import { stripProtocol } from "./progress.mjs"
+
 export function deriveTitle(task) {
   const first = String(task ?? "").trim().split(/\r?\n/).find((line) => line.trim().length > 0) ?? "delegated task"
   const plain = first.replace(/^[#>*\-\s]+/, "").replace(/[`*_]/g, "").trim()
@@ -67,7 +69,7 @@ export function readOutput(messagesNewestFirst, { cursor, maxChars = 8_000 } = {
   const pieces = []
   for (const message of span) {
     if (message.type !== "assistant") continue
-    const text = messageText(message)
+    const text = stripProtocol(messageText(message))
     if (text) pieces.push(text)
   }
 
