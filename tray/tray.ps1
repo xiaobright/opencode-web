@@ -34,6 +34,36 @@ Write-Log "starting (pid $PID, powershell $($PSVersionTable.PSVersion), root $Ro
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# WinForms paints menus at the process's DPI awareness. Left unaware (the default for a host that
+# never asks), Windows renders at 96 DPI and bitmap-stretches the result, which is what makes the
+# menu look soft on a 125-150% display. Every call below must happen before the first window exists.
+function Enable-DpiAwareness {
+  if ($PSVersionTable.PSVersion.Major -ge 6) {
+    try {
+      if ([System.Windows.Forms.Application]::SetHighDpiMode([System.Windows.Forms.HighDpiMode]::PerMonitorV2)) {
+        return "PerMonitorV2"
+      }
+    } catch { }
+  }
+
+  # Windows PowerShell 5.1 has no managed entry point; ask the OS directly, newest API first.
+  try {
+    Add-Type -Namespace OpenCodeWeb -Name NativeDpi -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetProcessDPIAware();
+'@ -ErrorAction Stop
+    if ([OpenCodeWeb.NativeDpi]::SetProcessDpiAwarenessContext([IntPtr](-4))) { return "PerMonitorV2 (native)" }
+    if ([OpenCodeWeb.NativeDpi]::SetProcessDPIAware()) { return "System" }
+  } catch { }
+
+  return "unaware"
+}
+
+$script:DpiMode = Enable-DpiAwareness
+Write-Log "dpi awareness: $script:DpiMode"
+
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 if ($Port -le 0) {
@@ -233,14 +263,26 @@ $icon.Icon = New-TrayIcon
 $icon.Text = "OpenCode"
 $icon.Visible = $false
 
+# Text starts at the left edge instead of after an empty icon gutter, and the extra row padding keeps
+# 9pt entries from looking cramped now that the menu renders at native DPI instead of being stretched.
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$menu.Items.Add("打开 WebUI").add_Click({ Open-Web })
-$bgItem = $menu.Items.Add("后台任务：检查中…")
-$bgItem.add_Click({ Open-Background })
-$menu.Items.Add("重启后台服务").add_Click({ Restart-Service })
+$menu.ShowImageMargin = $false
+$menu.ShowCheckMargin = $false
+$menu.Padding = New-Object System.Windows.Forms.Padding(2, 4, 2, 4)
+
+function Add-MenuItem([string]$Text, [scriptblock]$OnClick) {
+  $item = $menu.Items.Add($Text)
+  $item.Padding = New-Object System.Windows.Forms.Padding(0, 3, 0, 3)
+  if ($OnClick) { $item.add_Click($OnClick) }
+  return $item
+}
+
+Add-MenuItem "打开 WebUI" { Open-Web } | Out-Null
+$bgItem = Add-MenuItem "后台任务：检查中…" { Open-Background }
+Add-MenuItem "重启后台服务" { Restart-Service } | Out-Null
 $menu.Items.Add("-") | Out-Null
-$menu.Items.Add("仅关闭图标（服务和 Web 继续运行）").add_Click({ Close-Tray $false $true })
-$menu.Items.Add("退出（同时停止 Web 和后台服务）").add_Click({ Close-Tray $true })
+Add-MenuItem "仅关闭图标（服务和 Web 继续运行）" { Close-Tray $false $true } | Out-Null
+Add-MenuItem "退出（同时停止 Web 和后台服务）" { Close-Tray $true } | Out-Null
 $icon.ContextMenuStrip = $menu
 $icon.add_MouseClick({
     param($sender, $event)
