@@ -588,3 +588,251 @@ html[data-ocw-drafting] [data-slot="home-panel"],
 html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   visibility: hidden !important;
 }
+
+/* ── 后台任务（MCP 委派）：侧栏分组、图标栏角标、监视页 ────────────────── */
+
+.ocw-session-sub {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--v2-text-text-faint);
+}
+
+.ocw-session.is-background[data-busy] .ocw-session-sub {
+  color: var(--v2-text-text-muted);
+}
+
+.ocw-group.is-background {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--v2-border-border-base);
+}
+
+.ocw-group-count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-text-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.ocw-rail-btn {
+  position: relative;
+}
+
+.ocw-rail-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--v2-background-bg-accent);
+  color: var(--v2-text-text-inverse);
+  font-size: 9px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* 监视页：盖住右侧内容区，左侧给图标栏/侧栏让位；层级低于官方弹层（50）。 */
+.ocw-monitor {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--ocw-gutter, 52px);
+  z-index: 42;
+  display: flex;
+  flex-direction: column;
+  background: var(--v2-background-bg-base);
+  color: var(--v2-text-text-base);
+}
+
+.ocw-monitor[hidden] {
+  display: none;
+}
+
+.ocw-monitor-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 24px 12px;
+}
+
+.ocw-monitor-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ocw-monitor-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ocw-monitor-count {
+  color: var(--v2-text-text-faint);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ocw-monitor-sub {
+  flex: none;
+  padding: 0 24px 14px;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+}
+
+.ocw-monitor-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 28px;
+  overscroll-behavior: contain;
+}
+
+.ocw-monitor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 1040px;
+}
+
+.ocw-task {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 10px;
+  background: var(--v2-background-bg-layer-01);
+  cursor: pointer;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+
+.ocw-task:hover {
+  border-color: var(--v2-border-border-strong);
+  background: var(--v2-background-bg-layer-02);
+}
+
+.ocw-task.is-running {
+  border-color: var(--v2-border-border-strong);
+}
+
+.ocw-task-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ocw-task-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--v2-text-text-faint);
+}
+
+.ocw-task.is-running .ocw-task-dot {
+  background: var(--v2-text-text-base);
+  animation: ocw-task-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ocw-task-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ocw-task.is-running .ocw-task-dot {
+    animation: none;
+  }
+}
+
+.ocw-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.ocw-task-state {
+  flex: none;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+}
+
+.ocw-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--v2-text-text-muted);
+}
+
+.ocw-task-meta > span {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--v2-background-bg-layer-02);
+  line-height: 20px;
+}
+
+.ocw-task-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--v2-text-text-muted);
+}
+
+.ocw-flow-step {
+  padding: 1px 7px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.ocw-flow-step.is-running {
+  border-color: var(--v2-border-border-strong);
+  color: var(--v2-text-text-base);
+}
+
+.ocw-task-arrow {
+  color: var(--v2-text-text-faint);
+}
+
+.ocw-task-flow-empty {
+  color: var(--v2-text-text-faint);
+}
+
+.ocw-task-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--v2-text-text-faint);
+}
+
+.ocw-task-foot {
+  color: var(--v2-text-text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

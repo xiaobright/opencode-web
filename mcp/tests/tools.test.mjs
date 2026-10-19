@@ -18,7 +18,12 @@ async function setup(options = {}) {
   fixtures.push(fixture)
   const statePath = join(mkdtempSync(join(tmpdir(), "ocw-mcp-")), "tasks.json")
   const store = new DelegationStore({ path: statePath })
-  const tools = createTools({ api: fixtureApi(module, fixture.url), store, env: options.env ?? {}, cwd: process.cwd() })
+  const tools = createTools({
+    api: fixtureApi(module, fixture.url),
+    store,
+    env: { OPENCODE_MCP_DIRECTORY: process.cwd(), ...(options.env ?? {}) },
+    cwd: process.cwd(),
+  })
   return { fixture, store, tools, statePath }
 }
 
@@ -38,7 +43,20 @@ test("sync delegation creates a session, pre-approves tools, waits and returns t
   expect(fixture.state.prompts).toBe(1)
   const session = [...fixture.sessions.values()][0]
   expect(session.permissions).toEqual([{ action: "*", resource: "*", effect: "allow" }])
+  // The web sidebar and monitor split foreground from delegated work on this stamp.
+  expect(session.metadata).toEqual({ origin: "opencode-delegate", caller: "mcp", taskId: result.structured.taskId })
   expect(store.find(result.structured.taskId)?.sessionID).toBe(result.structured.sessionID)
+})
+
+test("caller comes from OPENCODE_MCP_CALLER and a per-call caller wins", async () => {
+  const { fixture, tools } = await setup({ env: { OPENCODE_MCP_CALLER: "codebuddy" } })
+  const fromEnv = await tools.opencode_delegate.handler({ task: "env caller" })
+  const fromArg = await tools.opencode_delegate.handler({ task: "arg caller", caller: "claude-code" })
+  const sessions = [...fixture.sessions.values()]
+  expect(sessions[0].metadata.caller).toBe("codebuddy")
+  expect(sessions[1].metadata.caller).toBe("claude-code")
+  expect(fromEnv.structured.caller).toBe("codebuddy")
+  expect(fromArg.structured.caller).toBe("claude-code")
 })
 
 test("async delegation returns a handle; wait completes; delta output does not repeat the turn", async () => {
@@ -119,11 +137,14 @@ test("help topics answer without side effects and unknown parameters are rejecte
 })
 
 test("delegation rejects a missing directory and an unknown model before creating anything", async () => {
-  const { fixture, tools } = await setup()
+  const { fixture, tools } = await setup({ env: { OPENCODE_MCP_DIRECTORY: "" } })
+  await expect(tools.opencode_delegate.handler({ task: "x" })).rejects.toThrow(/explicit working directory/)
   await expect(
     tools.opencode_delegate.handler({ task: "x", directory: join(tmpdir(), "ocw-does-not-exist") }),
   ).rejects.toThrow(/directory does not exist/)
-  await expect(tools.opencode_delegate.handler({ task: "x", model: "opencode/nope" })).rejects.toThrow(/unknown model/)
+  await expect(tools.opencode_delegate.handler({ task: "x", directory: process.cwd(), model: "opencode/nope" })).rejects.toThrow(
+    /unknown model/,
+  )
   expect(fixture.state.created).toBe(0)
 })
 

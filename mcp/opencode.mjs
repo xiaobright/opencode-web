@@ -68,7 +68,7 @@ export async function request(path, options = {}) {
 
 const sessionPath = (sessionID, suffix = "") => `/api/session/${encodeURIComponent(sessionID)}${suffix}`
 
-export async function createSession({ title, directory, model, agent, permissions }) {
+export async function createSession({ title, directory, model, agent, permissions, metadata }) {
   const body = await request("/api/session", {
     method: "POST",
     body: {
@@ -77,6 +77,7 @@ export async function createSession({ title, directory, model, agent, permission
       ...(model ? { model } : {}),
       ...(agent ? { agent } : {}),
       ...(permissions ? { permissions } : {}),
+      ...(metadata ? { metadata } : {}),
     },
   })
   return body.data

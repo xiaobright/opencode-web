@@ -63,7 +63,15 @@
 
 侧栏里的会话行也吃同一份状态：`scripts/progress-grid.js` 复刻官方的「像素格」工作动画（`SessionProgressIndicatorV2`，36 帧 @30fps 的 16×16 APNG，经 `feFlood`+`feComposite` 用 `currentColor` 染色、5×5 方块 `clipPath` 裁边）。滤镜/裁剪/图片数据全文档只挂一份 defs，每行会话只放一个 `<use>` 引用；`codex-shell.js` 依据 `activity-model.js` 暴露的 `busy(sessionID)` 给行切换 `data-busy`，动画节点常驻、由 CSS 控制显隐。系统开启「减少动态效果」时退化为官方同款的静止中心点。
 
-刷新网页即可加载这些文件，无需重启后台。移除这三个活动状态文件即可停用此功能；保留 `codex-shell.js` 中原有的 SSE Accept 兼容补丁。
+刷新网页即可加载这些文件，无需重启后台。移除这些活动状态文件即可停用此功能；保留 `codex-shell.js` 中原有的 SSE Accept 兼容补丁。
+
+## 后台任务（MCP 委派）
+
+`codex-shell.js` 按会话的 `metadata.origin === "opencode-delegate"` 分流：这类会话不进工作区分组，统一排在最上面的「后台任务」组，行左侧复用像素格动画、副标题显示 `caller · model`。图标栏的心跳按钮带运行数角标；点它、或点分组上的监视按钮、或从托盘菜单进来（URL 带 `?ocw=background`）会打开监视页。
+
+监视页是覆盖右侧内容区的只读面板（层级 42，低于官方弹层），每 2.5 秒读一次 `/api/session`、`/api/session/active` 和各会话最近 8 条消息：显示标题、调用方、模型、目录、最近一轮工具流程（`shell → edit`）、token/成本、完成状态，点卡片直接进会话，Esc 关闭。运行状态优先取 `/api/session/active`（权威），事件流负责即时熄灯——`activity-model.js` 的 `known()` 让「刚跑完」不必等下一次列表刷新。
+
+判定完全依赖 metadata，不需要额外登记表；TUI 自己开的会话不会被误判。要恢复成不分组，删掉 `codex-shell.js` 里 `BACKGROUND_ORIGIN` 相关的分流即可。
 
 本地验证：在 `tests/activity` 目录运行 `bun test ./model.test.mjs` 和 `bun run run.mjs`。浏览器检查使用已保留的 2.0.30 静态资源快照与官方事件夹具，独立端口 53128；不启动后台或调用真实模型。状态流的原字节、错误和取消继续传给官方客户端。首批消息兼容 `response.json()` 和 `response.text()`：当前 SDK 使用后者，因此会额外解析一次这批 JSON，读取元数据后立即释放，不再读取或复制响应流。
 

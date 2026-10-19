@@ -51,6 +51,8 @@ $state = @{
   Failures = 0
   StopService = $false
   KeepWeb = $false
+  Background = 0
+  BackgroundCache = @{}
 }
 
 # Only one icon at a time; a second launch (another location activating, or a double click on start.vbs)
@@ -156,6 +158,50 @@ function Open-Web {
   Start-Process $WebUrl
 }
 
+# 打开 WebUI 并直接进后台任务监视页（由页面脚本识别 ?ocw=background）。
+function Open-Background {
+  Start-Web
+  Start-Process ($WebUrl + "?ocw=background")
+}
+
+# 后台任务监视页：MCP 委派的会话在创建时写了 metadata.origin = opencode-delegate。
+# 只数「正在运行」的那些：活跃会话通常只有个位数，逐个读会话拿 metadata（带缓存）。
+function Get-BackgroundCount {
+  $found = Find-Service
+  if (-not $found) { return 0 }
+  try {
+    $headers = @{ Authorization = Get-Authorization $found.Info }
+    $active = Invoke-RestMethod -Uri "$($found.Info.url)/api/session/active" -Headers $headers -TimeoutSec 2
+    $ids = @($active.data.PSObject.Properties | ForEach-Object { $_.Name })
+    $next = @{}
+    $count = 0
+    foreach ($id in $ids) {
+      if ($state.BackgroundCache.ContainsKey($id)) {
+        $isBackground = $state.BackgroundCache[$id]
+      } else {
+        try {
+          $session = Invoke-RestMethod -Uri "$($found.Info.url)/api/session/$id" -Headers $headers -TimeoutSec 2
+          $isBackground = ($session.data.metadata.origin -eq 'opencode-delegate')
+        } catch { $isBackground = $false }
+      }
+      $next[$id] = $isBackground
+      if ($isBackground) { $count++ }
+    }
+    $state.BackgroundCache = $next
+    return $count
+  } catch { return 0 }
+}
+
+function Update-BackgroundItem {
+  $count = Get-BackgroundCount
+  if ($count -ne $state.Background) { Write-Log "background tasks running: $count" }
+  $state.Background = $count
+  if ($bgItem) {
+    $bgItem.Text = if ($count -gt 0) { "后台任务：$count 个在跑" } else { "后台任务：无正在运行" }
+  }
+  return $count
+}
+
 function Restart-Service {
   Invoke-Cli @("service", "restart")
   $state.Failures = 0
@@ -189,6 +235,8 @@ $icon.Visible = $false
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $menu.Items.Add("打开 WebUI").add_Click({ Open-Web })
+$bgItem = $menu.Items.Add("后台任务：检查中…")
+$bgItem.add_Click({ Open-Background })
 $menu.Items.Add("重启后台服务").add_Click({ Restart-Service })
 $menu.Items.Add("-") | Out-Null
 $menu.Items.Add("仅关闭图标（服务和 Web 继续运行）").add_Click({ Close-Tray $false $true })
@@ -206,14 +254,22 @@ function Update-Tray {
     # that starts or connects to the backend.
     try {
       $gateway = Invoke-RestMethod -Uri "${WebUrl}__opencode-web" -TimeoutSec 2
+      if ($gateway.backend -eq "ready") {
+        $count = Update-BackgroundItem
+      } else {
+        $state.Background = 0
+        $count = 0
+        if ($bgItem) { $bgItem.Text = "后台任务：待用" }
+      }
       $icon.Text = switch ($gateway.backend) {
         "starting" { "OpenCode · 正在启动" }
-        "ready" { "OpenCode · 点击打开网页" }
+        "ready" { if ($count -gt 0) { "OpenCode · $count 个后台任务在跑" } else { "OpenCode · 点击打开网页" } }
         "error" { "OpenCode · 启动失败，点击重试" }
         default { "OpenCode · 待用，点击启动" }
       }
     } catch {
       $icon.Text = "OpenCode · 待用，点击打开"
+      if ($bgItem) { $bgItem.Text = "后台任务：待用" }
     }
     $icon.Visible = $true
     return
@@ -222,7 +278,8 @@ function Update-Tray {
   if ($found) {
     if ($state.Failures -gt 2) { Write-Log "the service is back at $($found.Info.url)" }
     $state.Failures = 0
-    $icon.Text = "OpenCode $($found.Health.version) · $($found.Info.url)"
+    $count = Update-BackgroundItem
+    $icon.Text = if ($count -gt 0) { "OpenCode $($found.Health.version) · $count 个后台任务" } else { "OpenCode $($found.Health.version) · $($found.Info.url)" }
     if (-not $icon.Visible) { $icon.Visible = $true }
     return
   }
@@ -232,6 +289,8 @@ function Update-Tray {
   # been idle, and a click brings it back through the gateway. The icon therefore stays as
   # the entry point instead of exiting with the service.
   if ($state.Failures -eq 2) { Write-Log "no service running; the icon stays as the entry point" }
+  $state.Background = 0
+  if ($bgItem) { $bgItem.Text = "后台任务：无正在运行" }
   $icon.Text = "OpenCode · 待用，点击启动"
   if (-not $icon.Visible) { $icon.Visible = $true }
 }

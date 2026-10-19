@@ -155,7 +155,9 @@ opencode 里那批免费模型（默认 `opencode/deepseek-v4.1-flash-free`，�
 { "mcpServers": { "opencode": { "command": "node", "args": ["<repo>/mcp/index.mjs"] } } }
 ```
 
-它和网页端共用同一个后台服务（直接读 `service*.json`，不需要配地址和密码）；服务被自动休眠后，下次调用会自己拉起。委派跑的是真实的 opencode 会话，默认会话级预授权，所以无人值守也不会卡在工具审批上；任务的身份是 `session_id`，MCP 重启后照样能管理。完整说明、环境变量和测试见 `mcp/README.md`。
+它和网页端共用同一个后台服务（直接读 `service*.json`，不需要配地址和密码）；服务被自动休眠后，下次调用会自己拉起。委派跑的是真实的 opencode 会话，默认会话级预授权，所以无人值守也不会卡在工具审批上；任务的身份是 `session_id`，MCP 重启后照样能管理。
+
+委派产生的会话会带上 `metadata.origin = opencode-delegate`，所以不会散落在各工作区里：侧栏顶部单独一个「后台任务」组（标注调用方与模型），图标栏心跳按钮带运行数角标；点开是监视页，按会话显示目录、模型、工具流程、token/成本，2.5 秒刷新；托盘右键菜单也会显示「后台任务：N 个在跑」，点击直接进监视页。完整说明、环境变量和测试见 `mcp/README.md`。
 
 ## 注意
 

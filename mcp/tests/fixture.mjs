@@ -106,6 +106,7 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
           turns: 0,
           messages: [],
           permissions: input.permissions,
+          metadata: input.metadata,
         }
         sessions.set(created.id, created)
         state.created++
@@ -155,7 +156,7 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
     }
 
     if (request.method === "GET" && url.pathname === `/api/session/${session.id}`)
-      return json(200, { data: { id: session.id, title: session.title, location: session.location, time: { updated: Date.now() }, tokens: { input: 0, output: 0 }, cost: 0 } })
+      return json(200, { data: { id: session.id, title: session.title, location: session.location, metadata: session.metadata, time: { updated: Date.now() }, tokens: { input: 0, output: 0 }, cost: 0 } })
 
     return json(404, { error: "not found" })
   })

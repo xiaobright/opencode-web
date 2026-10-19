@@ -84,11 +84,14 @@ test("retry and compaction are distinct; tracking old sessions is bounded", () =
 test("busy mirrors the sidebar light: on between start and settle, off after, off when disconnected", () => {
   const state = model()
   expect(state.busy("session-a")).toBe(false)
+  expect(state.known("session-a")).toBe(false)
   send(state, "session.tool.called", { id: "one" })
   expect(state.busy("session-a")).toBe(true)
+  expect(state.known("session-a")).toBe(true)
   expect(state.busy("session-b")).toBe(false)
   state.connection(false)
   expect(state.busy("session-a")).toBe(false)
+  expect(state.known("session-a")).toBe(false)
   state.connection(true)
   expect(state.busy("session-a")).toBe(false)
   send(state, "session.execution.started")
@@ -97,4 +100,6 @@ test("busy mirrors the sidebar light: on between start and settle, off after, of
   expect(state.busy("session-a")).toBe(true)
   send(state, "session.execution.succeeded")
   expect(state.busy("session-a")).toBe(false)
+  // known() stays true after settling: the sidebar uses that to drop a stale active flag at once.
+  expect(state.known("session-a")).toBe(true)
 })

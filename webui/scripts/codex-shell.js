@@ -117,6 +117,9 @@
     plus: '<path d="M12 5.6v12.8M5.6 12h12.8"/>',
     folder: '<path d="M3.4 8.2a2 2 0 0 1 2-2h3l1.6 2h7.6a2 2 0 0 1 2 2v6.6a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2z"/>',
     chevron: '<path d="m9 5.5 6.5 6.5L9 18.5"/>',
+    // 心跳线：后台任务监视（MCP 委派出去的会话）
+    pulse: '<path d="M2.8 12h3.3l2.2-5.6 4.2 11.2 2.3-5.6h6.4"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
   }
 
   function icon(name, size) {
@@ -139,10 +142,27 @@
   }
 
   var ui = null
-  var state = { groups: [], loaded: false, loading: false, error: "", workspace: "" }
+  var state = {
+    groups: [],
+    background: [],
+    activeIds: new Set(),
+    loaded: false,
+    loading: false,
+    error: "",
+    workspace: "",
+  }
   var collapsedGroups = new Set() // 用户手动折起来的工作区
   var showAllGroups = new Set() // 用户手动展开到底的工作区
   var LIMIT = 8 // 每个工作区默认露几条，其余收在「还有 N 个」后面
+
+  // MCP 委派的会话在创建时写入 metadata.origin（见 mcp/tools.mjs）。侧栏据此把
+  // 后台任务从工作区分组里摘出来单独放，不让它们散落在各项目下面。
+  var BACKGROUND_ORIGIN = "opencode-delegate"
+  var BACKGROUND_GROUP = "__background"
+
+  function isBackground(session) {
+    return Boolean(session && session.metadata && session.metadata.origin === BACKGROUND_ORIGIN)
+  }
 
   /* ── 建壳 ── */
   function build() {
@@ -160,6 +180,11 @@
     top.appendChild(railButton("compose", "新聊天", "newchat", function () { openDraft("") }))
     top.appendChild(railButton("panel", "折叠 / 展开侧栏", "panel", toggleSidebar))
     top.appendChild(railButton("search", "搜索会话", "search", openSearch))
+    var backgroundButton = railButton("pulse", "后台任务监视", "background", openMonitor)
+    var backgroundBadge = el("span", "ocw-rail-badge")
+    backgroundBadge.hidden = true
+    backgroundButton.appendChild(backgroundBadge)
+    top.appendChild(backgroundButton)
     bottom.appendChild(railButton("sun", "切换明暗主题", "theme", toggleTheme))
     bottom.appendChild(railButton("settings", "设置", "settings", function () { go("/settings") }))
 
@@ -320,11 +345,31 @@
       var responses = await Promise.all([
         fetch("/api/project", { headers: { accept: "application/json" } }),
         fetch("/api/session?order=desc", { headers: { accept: "application/json" } }),
+        fetch("/api/session/active", { headers: { accept: "application/json" } }),
       ])
       if (!responses[0].ok || !responses[1].ok) throw new Error("HTTP " + responses[0].status + "/" + responses[1].status)
       var projects = await responses[0].json()
       var sessions = await responses[1].json()
-      state.groups = group(Array.isArray(projects) ? projects : [], (sessions && sessions.data) || [])
+      // 权威的运行状态：事件流只覆盖「页面打开之后」发生的事，页面打开前就在跑的
+      // 会话（尤其是 MCP 委派的后台任务）靠这个才亮得起来。
+      state.activeIds = new Set(
+        responses[2].ok ? Object.keys((await responses[2].json()).data || {}) : [],
+      )
+      var all = (sessions && sessions.data) || []
+      // 后台任务单独成组；工作区分组只收人自己开的会话。
+      state.background = all
+        .filter(function (session) {
+          return isBackground(session) && !session.parentID && !(session.time && session.time.archived)
+        })
+        .sort(function (a, b) {
+          return updated(b) - updated(a)
+        })
+      state.groups = group(
+        Array.isArray(projects) ? projects : [],
+        all.filter(function (session) {
+          return !isBackground(session)
+        }),
+      )
       state.error = ""
       state.loaded = true
     } catch (error) {
@@ -559,13 +604,20 @@
       return
     }
 
-    if (!state.groups.length) {
+    if (!state.groups.length && !state.background.length) {
       list.appendChild(message(state.error ? "列表读取失败：" + state.error : "还没有会话"))
       return
     }
 
     var activeId = currentSessionId()
     var shown = 0
+
+    // 后台任务固定排在最上面：它们不属于任何工作区，也不该散落在工作区分组里。
+    var background = backgroundSection(activeId, filterText)
+    if (background) {
+      list.appendChild(background)
+      shown += state.background.length
+    }
 
     for (var i = 0; i < state.groups.length; i++) {
       var item = state.groups[i]
@@ -641,6 +693,61 @@
     syncBusy()
   }
 
+  /* 后台任务这一组：MCP 委派出去的会话，按调用方/模型标注，运行中复用行左侧的像素格。 */
+  function backgroundSection(activeId, filterText) {
+    var sessions = state.background
+    if (filterText) {
+      var needle = String(filterText).toLowerCase()
+      sessions = sessions.filter(function (session) {
+        return String(session.title || "").toLowerCase().indexOf(needle) !== -1
+      })
+    }
+    if (!sessions.length) return null
+
+    var isCollapsed = !filterText && collapsedGroups.has(BACKGROUND_GROUP)
+    var hasActive = sessions.some(function (session) {
+      return session.id === activeId
+    })
+
+    var section = el("section", "ocw-group is-background")
+    if (isCollapsed) section.classList.add("is-collapsed")
+    if (hasActive) section.classList.add("has-active")
+
+    var row = el("div", "ocw-group-row")
+    var head = el("button", "ocw-group-head")
+    head.type = "button"
+    head.title = "MCP 委派的后台任务（metadata.origin = " + BACKGROUND_ORIGIN + "）"
+    head.innerHTML =
+      '<span class="ocw-caret">' + icon("chevron", 13) + "</span>" +
+      '<span class="ocw-group-icon">' + icon("pulse", 15) + "</span>" +
+      '<span class="ocw-group-name"></span>' +
+      '<span class="ocw-group-count"></span>'
+    head.querySelector(".ocw-group-name").textContent = "后台任务"
+    head.querySelector(".ocw-group-count").textContent = String(sessions.length)
+    head.addEventListener("click", function () {
+      if (collapsedGroups.has(BACKGROUND_GROUP)) collapsedGroups.delete(BACKGROUND_GROUP)
+      else collapsedGroups.add(BACKGROUND_GROUP)
+      renderList(query())
+    })
+
+    // 和「在某个工作区新建会话」同一个位置：这里放打开监视页的入口。
+    var monitorButton = el("button", "ocw-group-new", icon("pulse", 14))
+    monitorButton.type = "button"
+    monitorButton.title = "打开后台任务监视页"
+    monitorButton.setAttribute("aria-label", monitorButton.title)
+    monitorButton.addEventListener("click", openMonitor)
+
+    row.appendChild(head)
+    row.appendChild(monitorButton)
+    section.appendChild(row)
+
+    if (!isCollapsed) {
+      for (var i = 0; i < sessions.length; i++) section.appendChild(sessionRow(sessions[i], activeId, { background: true }))
+    }
+
+    return section
+  }
+
   function moreRow(groupId, remaining) {
     var row = el("button", "ocw-more")
     row.type = "button"
@@ -652,11 +759,15 @@
     return row
   }
 
-  function sessionRow(session, activeId) {
+  function sessionRow(session, activeId, options) {
+    var background = options && options.background
     var row = el("button", "ocw-session")
     row.type = "button"
-    row.title = session.title || session.id
     row.setAttribute("data-id", session.id)
+    if (background) {
+      row.setAttribute("data-background", "true")
+      row.classList.add("is-background")
+    }
     if (session.id === activeId) row.classList.add("is-active")
 
     // 会话名左边留的 33px 空槽：会话在工作时这里放官方那颗像素格动画（见 progress-grid.js）。
@@ -669,6 +780,22 @@
     label.textContent = session.title || "未命名会话"
     row.appendChild(label)
 
+    // 后台任务多一行来源标签：谁派的、用的哪个模型。工作区里的会话保持单行。
+    var caller = session.metadata && session.metadata.caller
+    var model = session.model && (session.model.id || session.model)
+    if (background && (caller || model)) {
+      var sub = el("span", "ocw-session-sub")
+      sub.textContent = [caller || "mcp", model || ""].filter(Boolean).join(" · ")
+      row.appendChild(sub)
+    }
+
+    var details = [session.title || session.id]
+    if (caller) details.push("调用方：" + caller)
+    if (model) details.push("模型：" + model)
+    if (session.metadata && session.metadata.taskId) details.push("任务：" + session.metadata.taskId)
+    if (session.location && session.location.directory) details.push("目录：" + session.location.directory)
+    row.title = details.join("\n")
+
     row.addEventListener("click", function () {
       go("/server/" + keySegment() + "/session/" + session.id)
     })
@@ -676,16 +803,252 @@
     return row
   }
 
-  /* ── 侧栏工作指示：activity-model 已经替我们盯着事件流，这里只按 sessionID 点灯。
+  /* ── 侧栏工作指示：事件流（实时）+ /api/session/active（权威）两条来源。
      订阅推送 + 350ms 轮询兜底（新渲染出的行、漏掉的终态都靠轮询自愈）。 ── */
-  function syncBusy() {
+  function isBusy(id) {
     var activity = window.__ocwActivity
-    if (!activity || !ui) return
+    // 事件流已经收到这个会话的收尾状态：立即熄灯，不等下一次列表刷新。
+    if (activity && activity.known && activity.known(id) && !activity.busy(id)) return false
+    if (state.activeIds.has(id)) return true
+    return Boolean(activity && activity.busy(id))
+  }
+
+  function syncBusy() {
+    if (!ui) return
     var rows = ui.list.querySelectorAll(".ocw-session[data-id]")
     for (var i = 0; i < rows.length; i++) {
-      var busy = activity.busy(rows[i].getAttribute("data-id"))
-      rows[i].toggleAttribute("data-busy", busy)
+      rows[i].toggleAttribute("data-busy", isBusy(rows[i].getAttribute("data-id")))
     }
+
+    // 图标栏那颗心跳按钮上的角标：正在跑的后台任务数（按已加载的会话算，不额外请求）。
+    var running = 0
+    for (var j = 0; j < state.background.length; j++) if (isBusy(state.background[j].id)) running++
+    var badge = ui.rail.querySelector('[data-rail="background"] .ocw-rail-badge')
+    if (badge) {
+      badge.textContent = running ? String(running) : ""
+      badge.hidden = running === 0
+    }
+  }
+
+  /* ── 后台任务监视页 ─────────────────────────────────────────────────────
+     覆盖右侧内容区的只读面板：列出 metadata.origin = opencode-delegate 的会话，
+     显示调用方、模型、目录、最近一轮的工具流程、token / 成本，2.5 秒轮询一次。
+     打开方式：图标栏心跳按钮、侧栏「后台任务」的监视按钮、托盘菜单
+     （URL 带 ?ocw=background）、Esc 关闭。 */
+  var monitor = null
+  var monitorTimer = null
+  var monitorBusy = false
+
+  function ago(timestamp) {
+    if (!timestamp) return "刚刚"
+    var seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000))
+    if (seconds < 45) return "刚刚"
+    if (seconds < 3600) return Math.round(seconds / 60) + " 分钟前"
+    if (seconds < 86400) return Math.round(seconds / 3600) + " 小时前"
+    return Math.round(seconds / 86400) + " 天前"
+  }
+
+  function compact(value) {
+    var number = Number(value) || 0
+    if (number < 1000) return String(number)
+    if (number < 1000000) return (number / 1000).toFixed(number < 10000 ? 1 : 0) + "k"
+    return (number / 1000000).toFixed(1) + "M"
+  }
+
+  function idleLabel(messages) {
+    var idle = (messages || []).find(function (message) {
+      return message.type === "idle"
+    })
+    if (!idle) return "空闲"
+    if (idle.outcome === "succeeded") return "已完成"
+    if (idle.outcome === "failed") return "失败"
+    if (idle.outcome === "interrupted") return "已取消"
+    return "空闲"
+  }
+
+  function flowOf(messages) {
+    var assistant = (messages || []).find(function (message) {
+      return message.type === "assistant"
+    })
+    if (!assistant) return []
+    return (assistant.content || [])
+      .filter(function (part) {
+        return part.type === "tool" && part.name
+      })
+      .map(function (part) {
+        return { name: part.name, running: Boolean(part.state && part.state.status === "running") }
+      })
+  }
+
+  function ensureMonitor() {
+    if (monitor && monitor.isConnected) return monitor
+
+    var panel = el("div", "ocw-monitor")
+    panel.id = "ocw-monitor"
+    panel.hidden = true
+    panel.innerHTML =
+      '<header class="ocw-monitor-head">' +
+      '<div class="ocw-monitor-heading">' +
+      '<span class="ocw-monitor-title">后台任务</span>' +
+      '<span class="ocw-monitor-count"></span>' +
+      "</div>" +
+      '<button type="button" class="ocw-icon-btn" data-monitor-close aria-label="关闭监视页">' +
+      icon("x", 16) +
+      "</button>" +
+      "</header>" +
+      '<div class="ocw-monitor-sub"></div>' +
+      '<div class="ocw-monitor-body"><div class="ocw-monitor-list"></div></div>'
+    panel.querySelector("[data-monitor-close]").addEventListener("click", closeMonitor)
+    ;(document.body || document.documentElement).appendChild(panel)
+    monitor = panel
+    return panel
+  }
+
+  function openMonitor() {
+    var panel = ensureMonitor()
+    if (!panel.hidden) {
+      refreshMonitor()
+      return
+    }
+    panel.hidden = false
+    document.documentElement.setAttribute("data-ocw-monitor", "")
+    panel.querySelector(".ocw-monitor-list").textContent = ""
+    panel.querySelector(".ocw-monitor-list").appendChild(message("正在读取后台任务…"))
+    refreshMonitor()
+    if (monitorTimer) clearInterval(monitorTimer)
+    monitorTimer = setInterval(refreshMonitor, 2500)
+  }
+
+  function closeMonitor() {
+    if (monitor) monitor.hidden = true
+    document.documentElement.removeAttribute("data-ocw-monitor")
+    if (monitorTimer) {
+      clearInterval(monitorTimer)
+      monitorTimer = null
+    }
+  }
+
+  async function refreshMonitor() {
+    if (!monitor || monitor.hidden || monitorBusy) return
+    monitorBusy = true
+    try {
+      var responses = await Promise.all([
+        fetch("/api/session?order=desc", { headers: { accept: "application/json" } }),
+        fetch("/api/session/active", { headers: { accept: "application/json" } }),
+      ])
+      var sessions = responses[0].ok ? (await responses[0].json()).data || [] : []
+      var active = responses[1].ok ? (await responses[1].json()).data || {} : {}
+      var items = sessions.filter(function (session) {
+        return isBackground(session) && !session.parentID
+      })
+      var shown = items.slice(0, 24)
+      var details = await Promise.all(
+        shown.map(function (session) {
+          return fetch("/api/session/" + session.id + "/message?limit=8", { headers: { accept: "application/json" } })
+            .then(function (response) {
+              return response.ok ? response.json() : null
+            })
+            .then(function (body) {
+              return (body && body.data) || []
+            })
+            .catch(function () {
+              return []
+            })
+        }),
+      )
+      renderMonitor(shown, active, details)
+    } catch (error) {
+      // 保留上一帧；下一轮再试。
+    } finally {
+      monitorBusy = false
+    }
+  }
+
+  function renderMonitor(items, active, details) {
+    if (!monitor) return
+    var running = items.filter(function (session) {
+      return active[session.id]
+    }).length
+    monitor.querySelector(".ocw-monitor-count").textContent = items.length ? String(items.length) : ""
+    monitor.querySelector(".ocw-monitor-sub").textContent =
+      "MCP 委派 · " +
+      (running ? running + " 个在运行" : "当前没有运行中的任务") +
+      " · 每 2.5 秒刷新"
+
+    var list = monitor.querySelector(".ocw-monitor-list")
+    list.textContent = ""
+    if (!items.length) {
+      list.appendChild(message("还没有后台任务。用 MCP 委派后，这里会按会话显示运行状态、目录和工具流程。"))
+      return
+    }
+    items.forEach(function (session, index) {
+      list.appendChild(taskCard(session, Boolean(active[session.id]), details[index]))
+    })
+  }
+
+  function taskCard(session, running, messages) {
+    var card = el("article", "ocw-task")
+    card.setAttribute("data-id", session.id)
+    if (running) card.classList.add("is-running")
+
+    var head = el("div", "ocw-task-head")
+    head.appendChild(el("span", "ocw-task-dot"))
+    var title = el("span", "ocw-task-title")
+    title.textContent = session.title || "未命名会话"
+    title.title = title.textContent
+    head.appendChild(title)
+    var state = el("span", "ocw-task-state")
+    state.textContent = running ? "运行中" : idleLabel(messages)
+    head.appendChild(state)
+
+    var meta = el("div", "ocw-task-meta")
+    var caller = el("span", "ocw-task-caller")
+    caller.textContent = (session.metadata && session.metadata.caller) || "mcp"
+    var model = el("span", "ocw-task-model")
+    model.textContent = (session.model && (session.model.id || session.model)) || "?"
+    meta.appendChild(caller)
+    meta.appendChild(model)
+
+    var flow = el("div", "ocw-task-flow")
+    var steps = flowOf(messages)
+    if (steps.length) {
+      steps.slice(0, 6).forEach(function (step, index) {
+        if (index) flow.appendChild(el("span", "ocw-task-arrow", "→"))
+        var chip = el("span", "ocw-flow-step")
+        if (step.running) chip.classList.add("is-running")
+        chip.textContent = step.name
+        flow.appendChild(chip)
+      })
+      if (steps.length > 6) flow.appendChild(el("span", "ocw-task-arrow", "…"))
+    } else {
+      flow.appendChild(el("span", "ocw-task-flow-empty", "还没有工具调用"))
+    }
+
+    var directory = el("div", "ocw-task-dir")
+    directory.textContent = (session.location && session.location.directory) || "未知目录"
+    directory.title = directory.textContent
+
+    var foot = el("div", "ocw-task-foot")
+    var tokens = session.tokens || {}
+    var pieces = [
+      ago(session.time && session.time.updated),
+      compact(tokens.input) + " in / " + compact(tokens.output) + " out",
+    ]
+    if (typeof session.cost === "number" && session.cost > 0) pieces.push("cost " + session.cost.toFixed(4))
+    else pieces.push("cost 0")
+    if (session.metadata && session.metadata.taskId) pieces.push(session.metadata.taskId)
+    foot.textContent = pieces.join(" · ")
+
+    card.appendChild(head)
+    card.appendChild(meta)
+    card.appendChild(flow)
+    card.appendChild(directory)
+    card.appendChild(foot)
+    card.addEventListener("click", function () {
+      closeMonitor()
+      go(sessionUrl(session.id))
+    })
+    return card
   }
 
   function message(text) {
@@ -728,6 +1091,20 @@
 
     build()
     void refresh()
+
+    // 托盘菜单用 ?ocw=background 直接打开监视页；打开后把参数从地址栏摘掉。
+    if (/[?&]ocw=background/.test(location.search)) {
+      try {
+        history.replaceState(null, "", location.pathname + location.hash)
+      } catch (error) {
+        void error
+      }
+      openMonitor()
+    }
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && monitor && !monitor.hidden) closeMonitor()
+    })
 
     // 活动状态推送一来就点灯/熄灯（activity-model.js 按文件名顺序先于本脚本加载）
     if (window.__ocwActivity && typeof window.__ocwActivity.subscribe === "function")

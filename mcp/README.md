@@ -51,10 +51,21 @@ opencode 里能白嫖一批免费模型（`/api/model` 里 `cost.input == 0 && c
 }
 ```
 
-- `directory` 必须是已存在的绝对路径：它是 agent 的工作目录，也是 opencode 会话归属的项目。
+- `directory` 必须是已存在的绝对路径：它是 agent 的工作目录，也是 opencode 会话归属的项目。**没有隐式 cwd 回退**——不传就得配 `OPENCODE_MCP_DIRECTORY`，否则直接报错，会话不会落到意料之外的项目里。
 - `model` 接受 `provider/modelID` 或裸 model id；默认 `opencode/deepseek-v4.1-flash-free`，模型下架时自动回落到目录里第一个免费可用项。
+- `caller` 记录是哪个 agent 派的任务（默认取 `OPENCODE_MCP_CALLER`，再退到 `mcp`）。它和 `origin`、`taskId` 一起写进 `session.metadata`：网页侧栏据此把会话归到「后台任务」，监视页和托盘也按它显示调用方。
 - `mode="sync"` 的 `timeout_ms` 默认取 `OPENCODE_MCP_DEFAULT_WAIT_MS`（120000），上限 `OPENCODE_MCP_MAX_WAIT_MS`（540000）。预算用完**不代表失败**：任务还在跑，返回里带 `task_id`；`on_timeout="interrupt"` 才会中断。
 - `permissions="allow"`（默认）预授权所有工具；`"default"` 保留 opencode 原生的审批流程（无人值守时可能卡住）。
+
+### 在网页和托盘里看
+
+委派产生的会话带着 `metadata: { origin: "opencode-delegate", caller, taskId }`，所以：
+
+- **侧栏**：后台会话不散落在各工作区里，统一进顶部「后台任务」分组，每行标注 `caller · model`，运行中复用行左侧的像素格动画；
+- **监视页**：图标栏心跳按钮（侧栏分组的监视按钮也行）打开，按会话显示运行状态、调用方、模型、目录、最近一轮工具流程、token/成本，2.5 秒刷新，点卡片跳进会话；
+- **托盘**：右键菜单实时显示「后台任务：N 个在跑」，点击直接打开监视页（`?ocw=background`），图标提示也会带上数量。
+
+不需要任何额外登记：判定完全来自会话 metadata，TUI 自己开的会话不会被误认成后台任务。
 
 ### 管理
 
@@ -79,7 +90,8 @@ opencode 里能白嫖一批免费模型（`/api/model` 里 `cost.input == 0 && c
 
 | 变量 | 作用 |
 | --- | --- |
-| `OPENCODE_MCP_DIRECTORY` | 默认工作目录；不设则用 MCP 进程 cwd |
+| `OPENCODE_MCP_DIRECTORY` | 默认工作目录；不设则每次委派都必须显式传 `directory` |
+| `OPENCODE_MCP_CALLER` | 记录调用方（写进会话 metadata），默认 `mcp`；每个客户端的 MCP 配置里设成自己的名字 |
 | `OPENCODE_MCP_MODEL` | 默认模型，默认 `opencode/deepseek-v4.1-flash-free` |
 | `OPENCODE_MCP_DEFAULT_WAIT_MS` | `sync` / `wait` / `message` 的默认等待，默认 120000 |
 | `OPENCODE_MCP_MAX_WAIT_MS` | 单次等待上限，默认 540000 |

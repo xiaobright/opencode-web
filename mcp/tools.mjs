@@ -24,6 +24,10 @@ import {
   stateFromMessages,
 } from "./tasks.mjs"
 
+// Sessions created here carry this metadata origin, which is how the web UI and the tray
+// tell delegated background work apart from sessions a human opened.
+export const BACKGROUND_ORIGIN = "opencode-delegate"
+
 const ACTIONS = ["list", "status", "wait", "output", "message", "cancel"]
 
 function settings(env, cwd) {
@@ -35,7 +39,11 @@ function settings(env, cwd) {
     defaultModel: env.OPENCODE_MCP_MODEL || "opencode/deepseek-v4.1-flash-free",
     defaultWaitMs: number("OPENCODE_MCP_DEFAULT_WAIT_MS", 120_000),
     maxWaitMs: number("OPENCODE_MCP_MAX_WAIT_MS", 540_000),
-    directory: env.OPENCODE_MCP_DIRECTORY || cwd,
+    // Delegated work must run in a directory the caller chose: an implicit cwd scatters
+    // sessions into whatever directory the MCP client happened to spawn the server in.
+    directory: env.OPENCODE_MCP_DIRECTORY || "",
+    caller: env.OPENCODE_MCP_CALLER || "mcp",
+    cwd,
   }
 }
 
@@ -93,10 +101,15 @@ function describeTurn(turn) {
   return pieces.join(" · ")
 }
 
-function header({ taskId, sessionID, title, model, directory, state, waitedMs, turn }) {
+function header({ taskId, sessionID, title, model, directory, caller, state, waitedMs, turn }) {
   const elapsed = waitedMs === undefined ? "" : ` · ${(waitedMs / 1000).toFixed(1)}s`
   const lines = [`Task ${taskId ?? sessionID} · ${state}${elapsed}`]
-  const context = [`session ${sessionID}`, model ? `model ${model}` : "", directory ? `dir ${directory}` : ""]
+  const context = [
+    `session ${sessionID}`,
+    model ? `model ${model}` : "",
+    caller ? `caller ${caller}` : "",
+    directory ? `dir ${directory}` : "",
+  ]
     .filter(Boolean)
     .join(" · ")
   lines.push(context)
@@ -141,13 +154,17 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
     const tool = "opencode_delegate"
     rejectUnexpected(
       args,
-      ["task", "title", "directory", "model", "agent", "mode", "timeout_ms", "on_timeout", "permissions"],
+      ["task", "title", "directory", "model", "agent", "mode", "timeout_ms", "on_timeout", "permissions", "caller"],
       tool,
     )
     const task = requireString(args, "task", tool)
     const mode = oneOf(args.mode, ["sync", "async"], "sync", tool, "mode")
     const onTimeout = oneOf(args.on_timeout, ["detach", "interrupt"], "detach", tool, "on_timeout")
-    const directory = normalizeDirectory(optionalString(args, "directory") ?? config.directory)
+    const directory = normalizeDirectory(
+      optionalString(args, "directory") ||
+        config.directory ||
+        fail(tool, "pass directory or set OPENCODE_MCP_DIRECTORY: delegated sessions must have an explicit working directory."),
+    )
     const model = await resolveModel(optionalString(args, "model"))
     const timeoutMs = clamp(optionalNumber(args, "timeout_ms", tool) ?? config.defaultWaitMs, 1_000, config.maxWaitMs)
     const permissions =
@@ -155,6 +172,8 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
         ? [{ action: "*", resource: "*", effect: "allow" }]
         : undefined
     const title = optionalString(args, "title") ?? deriveTitle(task)
+    const caller = optionalString(args, "caller") ?? config.caller
+    const taskId = newTaskId()
 
     const session = await api.createSession({
       title,
@@ -162,15 +181,17 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
       model,
       agent: optionalString(args, "agent"),
       permissions,
+      metadata: { origin: BACKGROUND_ORIGIN, caller, taskId },
     })
     await api.prompt(session.id, task)
 
     const record = registry.add({
-      taskId: newTaskId(),
+      taskId,
       sessionID: session.id,
       title,
       model: `${model.providerID}/${model.id}`,
       directory,
+      caller,
       agent: optionalString(args, "agent") ?? null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -185,7 +206,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
           `session ${session.id} · model ${record.model} · dir ${directory}`,
           `Continue: opencode_task action="wait" task_id="${record.taskId}" wait_ms=60000`,
         ].join("\n"),
-        structured: { taskId: record.taskId, sessionID: session.id, state: "running", model: record.model, directory, title },
+        structured: { taskId: record.taskId, sessionID: session.id, state: "running", model: record.model, directory, title, caller },
       }
 
     let waited = await api.wait(session.id, timeoutMs)
@@ -233,6 +254,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
         model: record.model,
         directory,
         title,
+        caller,
         tokens: turn?.tokens ?? null,
         cost: turn?.cost ?? null,
         tools: turn?.tools ?? [],
@@ -286,6 +308,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
           header({
             taskId: record?.taskId,
             sessionID,
+            caller: record?.caller,
             title: info?.title ?? record?.title,
             model: record?.model,
             directory: info?.location?.directory ?? record?.directory,
@@ -325,6 +348,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
       const summary = header({
         taskId: record?.taskId,
         sessionID,
+        caller: record?.caller,
         title: record?.title,
         model: record?.model,
         directory: record?.directory,
@@ -368,7 +392,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
       registry.update(record?.taskId, { state, lastCursor: output.nextCursor })
       return {
         text: [
-          header({ taskId: record?.taskId, sessionID, title: record?.title, model: record?.model, state }),
+          header({ taskId: record?.taskId, sessionID, caller: record?.caller, title: record?.title, model: record?.model, state }),
           output.text || "(no assistant text in this span)",
           `cursor ${output.nextCursor ?? "(none)"} · ${output.assistantMessages} assistant message(s)${output.truncated ? " · truncated" : ""}`,
         ].join("\n\n"),
@@ -406,6 +430,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
           header({
             taskId: record?.taskId,
             sessionID,
+            caller: record?.caller,
             title: record?.title,
             model: record?.model,
             state,
@@ -437,6 +462,7 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
       text: header({
         taskId: record?.taskId,
         sessionID,
+        caller: record?.caller,
         title: record?.title,
         model: record?.model,
         state,
@@ -488,12 +514,13 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
       "Help topics: overview, delegate, manage, models, output. Ordinary calls are self-contained.",
     ],
     delegate: [
-      'opencode_delegate { task, directory?, model?, title?, mode?, timeout_ms?, on_timeout?, permissions? }',
-      'directory must be an absolute path of an existing project directory; it is the agent\'s working directory. Default: OPENCODE_MCP_DIRECTORY or the MCP process cwd.',
+      'opencode_delegate { task, directory?, model?, title?, mode?, timeout_ms?, on_timeout?, permissions?, caller? }',
+      'directory must be an absolute path of an existing project directory; it is the agent\'s working directory. Default: OPENCODE_MCP_DIRECTORY. One of the two is required — there is no implicit cwd, so sessions never land in unexpected projects.',
       'model accepts "provider/modelID" or a bare model id; default opencode/deepseek-v4.1-flash-free. Use opencode_models to see free ones.',
       'mode="sync" (default) waits up to timeout_ms (default 120000, cap OPENCODE_MCP_MAX_WAIT_MS=540000). If the budget runs out the task keeps running; on_timeout="interrupt" stops it instead.',
       'mode="async" returns immediately with task_id and session_id. Prefer async for long builds or research, then poll with action="wait" (60s budgets).',
       'permissions="allow" (default) pre-approves tools; "default" leaves opencode asking, which can stall an unattended delegation.',
+      'Every session is stamped metadata { origin: "opencode-delegate", caller, taskId }: the web sidebar puts it under 后台任务 and the monitor page shows it. caller defaults to OPENCODE_MCP_CALLER or "mcp".',
     ],
     manage: [
       'opencode_task action="list" shows delegations recorded by this MCP process (newest first, cached states; one /api/session/active probe refreshes running flags).',
@@ -558,9 +585,10 @@ export function createTools({ api, env = process.env, cwd = process.cwd(), store
         properties: {
           task: { type: "string", description: "The complete instruction for the delegated agent." },
           title: { type: "string", description: "Session title shown in the opencode UI. Defaults to the task's first line." },
-          directory: { type: "string", description: "Absolute working directory for the agent. Defaults to OPENCODE_MCP_DIRECTORY or the MCP cwd." },
+          directory: { type: "string", description: "Absolute working directory for the agent. Defaults to OPENCODE_MCP_DIRECTORY; required when that is not set." },
           model: { type: "string", description: 'Model ref, e.g. "opencode/deepseek-v4.1-flash-free" or a bare model id.' },
           agent: { type: "string", description: "opencode agent name (default: opencode's own default)." },
+          caller: { type: "string", description: "Which agent started this delegation; recorded in session metadata and shown in the web monitor and tray." },
           mode: { type: "string", enum: ["sync", "async"], default: "sync", description: "sync waits for the reply; async returns a task id immediately." },
           timeout_ms: { type: "number", minimum: 1000, description: "Wait budget for mode=sync; capped by OPENCODE_MCP_MAX_WAIT_MS." },
           on_timeout: { type: "string", enum: ["detach", "interrupt"], default: "detach", description: "When the wait budget runs out: keep the session running or interrupt it." },

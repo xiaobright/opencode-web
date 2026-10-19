@@ -56,6 +56,10 @@
     var state = sessions.get(id)
     return !!state && state.phase !== "idle"
   }
+  // 事件流是否已经为这个会话收到过状态：用来让"收尾"立即可见，不必等下一次列表刷新。
+  function known(id) {
+    return !disconnected && sessions.has(id)
+  }
   function label(id) {
     if (!id) return null
     if (disconnected) return { text: "状态连接已断开", title: "尚未恢复实时状态，不能确认任务当前阶段。" }
@@ -100,7 +104,7 @@
     notify()
   }
   window.__ocwActivity = {
-    accept: accept, label: label, seed: seed, busy: busy,
+    accept: accept, label: label, seed: seed, busy: busy, known: known,
     version: function () { return version },
     subscribe: function (listener) { listeners.add(listener); return function () { listeners.delete(listener) } },
     connection: function (connected) { sessions.clear(); resetVersion = ++version; disconnected = !connected; notify() },
