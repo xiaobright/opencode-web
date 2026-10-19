@@ -6,7 +6,7 @@
 { "mcpServers": { "opencode": {
   "command": "node",
   "args": ["E:\\Desktop\\mytests\\opencode-web\\mcp\\index.mjs"],
-  "env": { "OPENCODE_MCP_DIRECTORY": "E:\\Desktop\\mytests\\opencode-web", "OPENCODE_MCP_CALLER": "codebuddy" }
+  "env": { "OPENCODE_MCP_CALLER": "codebuddy" }
 } } }
 ```
 
@@ -16,12 +16,12 @@
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
-| `opencode_delegate` | `task*`、`directory` | 开一个全新会话把任务交出去。短任务直接返回答案；还在跑就返回 `session_id` |
+| `opencode_delegate` | `task*`、`directory*` | 开一个全新会话把任务交出去。短任务直接返回答案；还在跑就返回 `session_id` |
 | `opencode_session` | `action*`、`session_id*`、`text` | `status` / `wait` / `message` / `cancel` |
 
 **模型、权限、调用方标识、标题都不在参数里**：这些是服务端（运营者）的决定，调用方不需要知道用哪个免费模型、额度怎么算，也不需要选 agent。
 
-- `directory` 必须是已存在的绝对路径；不传就用 `OPENCODE_MCP_DIRECTORY`，两者都没有会直接报错——**没有隐式 cwd**，会话不会落到意料之外的项目。
+- `directory` **必填**：必须是已存在的绝对路径，没有默认值也没有隐式 cwd——会话不会落到意料之外的项目。
 - 会话级预授权（工具全放行），无人值守不会卡在审批上。
 - `opencode_delegate` 先等 20 秒：够快的一次调用就拿到答案；更久的会返回 `session_id`，后续用 `wait` 续等。
 - `wait` 默认每次等 30 秒，为 MCP 客户端常见的 60 秒请求超时留出状态查询和传输余量；等待预算用完时会话继续跑，再调一次即可。调大服务端等待预算前，也需相应调大客户端请求超时。
@@ -103,7 +103,6 @@ Files: 2 changed +31 −4 (a.js, b.js)
 
 | 变量 | 作用 |
 | --- | --- |
-| `OPENCODE_MCP_DIRECTORY` | 默认工作目录；不设则每次委派必须传 `directory` |
 | `OPENCODE_MCP_CALLER` | 记录调用方（写进会话 metadata），默认 `mcp` |
 | `OPENCODE_MCP_MODEL` | 强制钉死模型，优先于网页排序；默认留空 |
 | `OPENCODE_WEB_STATE_DIR` | 状态目录（排序文件），默认仓库下 `.state/`；网页网关与 MCP 共用 |

@@ -32,7 +32,7 @@ function record(name, value) {
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n")
   console.log(JSON.stringify({ name, ...value }))
 }
-const env = { ...process.env, OPENCODE_MCP_DIRECTORY: directory, OPENCODE_MCP_MODEL: chosen, OPENCODE_MCP_CALLER: "live-smoke", OPENCODE_MCP_DELEGATE_WAIT_MS: "25", OPENCODE_MCP_WAIT_MS: "60000", OPENCODE_MCP_PROTOCOL: "on" }
+const env = { ...process.env, OPENCODE_MCP_MODEL: chosen, OPENCODE_MCP_CALLER: "live-smoke", OPENCODE_MCP_DELEGATE_WAIT_MS: "25", OPENCODE_MCP_WAIT_MS: "60000", OPENCODE_MCP_PROTOCOL: "on" }
 async function connect() {
   const client = new Client({ name: "live-smoke", version: "1" })
   const transport = new StdioClientTransport({ command: "node", args: [fileURLToPath(new URL("./index.mjs", import.meta.url))], env, stderr: "pipe" })
@@ -56,7 +56,7 @@ async function settle(client, result) {
 let client
 try {
   client = await connect()
-  const first = await call(client, "opencode_delegate", { task: "Acceptance check: read marker.txt with a file-reading tool, then reply LIVE_DELEGATE_OK:<file contents>. Do not modify files or use network tools." })
+  const first = await call(client, "opencode_delegate", { directory, task: "Acceptance check: read marker.txt with a file-reading tool, then reply LIVE_DELEGATE_OK:<file contents>. Do not modify files or use network tools." })
   record("delegate-start", first)
   await client.close()
   client = await connect()
@@ -109,7 +109,7 @@ try {
     parkedID = (await api.prompt(id, "Acceptance check left paused; reply LIVE_PARKED if explicitly resumed. No tools.", { delivery: "queue", resume: false })).id
     return waited
   } } })
-  const boundary = await boundaryTools.opencode_delegate.handler({ task: "Reply LIVE_BOUNDARY_OK. No tools are needed." })
+  const boundary = await boundaryTools.opencode_delegate.handler({ directory, task: "Reply LIVE_BOUNDARY_OK. No tools are needed." })
   record("settled-with-pending", { ...boundary.structured, parked_id: parkedID })
   assert.equal(boundary.structured.state, "queued")
   assert.equal(boundary.structured.input_outcome, "succeeded")

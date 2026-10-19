@@ -50,8 +50,8 @@ test("missing lifecycle capability fails before any session or prompt is created
   const fixture = await startFixture({ document })
   try {
     const api = fixtureApi(module, fixture.url)
-    const tools = createTools({ api, env: { OPENCODE_MCP_DIRECTORY: process.cwd() } })
-    await expect(tools.opencode_delegate.handler({ task: "must not run" })).rejects.toThrow(/Unsupported OpenCode API.*inbox/)
+    const tools = createTools({ api, env: {} })
+    await expect(tools.opencode_delegate.handler({ directory: process.cwd(), task: "must not run" })).rejects.toThrow(/Unsupported OpenCode API.*inbox/)
     expect(fixture.state.created).toBe(0)
     expect(fixture.state.prompts).toBe(0)
   } finally { await fixture.close() }

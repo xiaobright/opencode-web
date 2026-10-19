@@ -33,9 +33,6 @@ function settings(env) {
   return {
     // Empty means "no pin": the web UI's ranking decides.
     model: env.OPENCODE_MCP_MODEL || "",
-    // Delegated work must run in a directory the caller chose: an implicit cwd scatters
-    // sessions into whatever directory the MCP client happened to spawn the server in.
-    directory: env.OPENCODE_MCP_DIRECTORY || "",
     caller: env.OPENCODE_MCP_CALLER || "mcp",
     protocol: env.OPENCODE_MCP_PROTOCOL !== "off",
     delegateWaitMs: number("OPENCODE_MCP_DELEGATE_WAIT_MS", 20_000),
@@ -150,11 +147,9 @@ export function createTools({ api, env = process.env } = {}) {
     const tool = "opencode_delegate"
     rejectUnexpected(args, ["task", "directory"], tool)
     const task = requireString(args, "task", tool)
-    const directory = normalizeDirectory(
-      (args.directory === undefined ? undefined : requireString(args, "directory", tool)) ||
-        config.directory ||
-        fail(tool, "pass directory or set OPENCODE_MCP_DIRECTORY: delegated sessions need an explicit working directory."),
-    )
+    // No default and no implicit cwd: a delegated session must never inherit whatever
+    // directory the MCP client happened to launch in.
+    const directory = normalizeDirectory(requireString(args, "directory", tool))
     const capabilities = await api.capabilities()
     const model = await resolveModel()
 
@@ -213,16 +208,20 @@ export function createTools({ api, env = process.env } = {}) {
 
   return {
     opencode_delegate: {
-      title: "Delegate a task",
+      title: "Delegate a task to a background agent",
       description:
-        "Run one task in a fresh opencode session. Returns the answer, or the session id and its progress while it is still running.",
+        "Hand a self-contained task to a separate agent in a fresh session. It keeps running after your turn ends, " +
+        "several run at once, and the user can watch or take it over in the opencode UI. " +
+        "Prefer it for long or noisy work whose steps should not land in your own context: repo-wide search, " +
+        "multi-file reads, builds, test suites, batch jobs. " +
+        "Returns the answer, or a session_id plus progress while it runs.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "The complete instruction for the agent." },
-          directory: { type: "string", description: "Existing absolute working directory for the task." },
+          directory: { type: "string", description: "Absolute path of the existing workspace this task runs in. Required: sessions never inherit your cwd." },
         },
-        required: ["task"],
+        required: ["task", "directory"],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -230,18 +229,20 @@ export function createTools({ api, env = process.env } = {}) {
     },
     opencode_session: {
       title: "Talk to a delegated session",
-      description: "Check a session or wait for execution, steer with a follow-up, or interrupt active execution (pending Inbox inputs are retained).",
+      description: "Check a session, wait for its execution to finish, send a follow-up, or cancel the running turn (queued inputs are kept).",
       inputSchema: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ACTIONS, description: "status, wait, message or cancel." },
+          action: { type: "string", enum: ACTIONS },
           session_id: { type: "string", description: "Session id returned by opencode_delegate." },
           text: { type: "string", description: 'Follow-up instruction for action="message".' },
         },
         required: ["action", "session_id"],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      // status and wait only read; cancel is the one destructive action, and a whole-tool
+      // "destructive" hint would make every status call look like a risky write.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       handler: session,
     },
   }

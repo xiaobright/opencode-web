@@ -15,12 +15,18 @@ const server = new Server(
   { name: "opencode-delegate", version: "0.2.0" },
   {
     capabilities: { tools: {} },
-    // Only what a caller needs to use the server. How it picks a model, which
-    // permissions it grants and where it keeps state is not the caller's business.
+    // Only what a caller needs to decide and use. How the server picks a model,
+    // which permissions it grants and where it keeps state is not the caller's business.
+    // These sessions are not a second copy of the caller's own subagents: they outlive
+    // the turn, run side by side, and the user can watch or take them over in the UI.
     instructions:
-      "Delegate tasks and continue them by session_id. Track your input with input_status and input_outcome. " +
-      "wait observes without resuming paused work; cancel interrupts execution and retains pending inputs. " +
-      "After a timeout, check or wait on the existing session before resubmitting.",
+      "The sessions you create here are separate from your own subagents: they run on this machine, " +
+      "keep working after your turn ends, run in parallel, and the user can watch or take over in the opencode web UI. " +
+      "Use one for long or noisy work -- repo-wide searches, many file reads, builds, test suites, batch jobs -- " +
+      "or for work that should continue while you do something else. " +
+      "Keep the session_id: wait to observe, message to steer, cancel to stop the running turn (queued inputs are kept). " +
+      "Always pass directory: a delegated session never inherits your working directory. " +
+      "Do single-step work yourself; after a timeout check the existing session instead of resubmitting.",
   },
 )
 

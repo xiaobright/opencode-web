@@ -25,7 +25,6 @@ function fixtureClient(fixture, env = {}) {
       ...process.env,
       XDG_STATE_HOME: stateHome,
       OPENCODE_BIN: join(root, "no-such-opencode.exe"),
-      OPENCODE_MCP_DIRECTORY: process.cwd(),
       OPENCODE_WEB_STATE_DIR: root,
       OPENCODE_MCP_MODEL: "",
       OPENCODE_MCP_WAIT_MS: "",
@@ -56,7 +55,7 @@ test("stdio server exposes two tools and delegates through a discovered service"
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual(["opencode_delegate", "opencode_session"])
     for (const tool of listed.tools) expect(tool.inputSchema.type).toBe("object")
 
-    const delegated = await call(client, { name: "opencode_delegate", arguments: { task: "say pong" } })
+    const delegated = await call(client, { name: "opencode_delegate", arguments: { directory: process.cwd(), task: "say pong" } })
     expect(delegated.isError).toBeFalsy()
     expect(delegated.structuredContent.state).toBe("done")
     expect(delegated.structuredContent.text).toBe("PONG.")
@@ -75,7 +74,7 @@ test("stdio server exposes two tools and delegates through a discovered service"
     })
     expect(followUp.structuredContent.state).toBe("done")
 
-    const failed = await client.callTool({ name: "opencode_delegate", arguments: { task: "x", bogus: 1 } })
+    const failed = await client.callTool({ name: "opencode_delegate", arguments: { directory: process.cwd(), task: "x", bogus: 1 } })
     expect(failed.isError).toBe(true)
     expect(failed.content[0].text).toContain("unexpected parameter")
   } finally {
@@ -90,7 +89,7 @@ test("a wait without a configured budget returns a running result well inside th
   const { client, transport } = fixtureClient(fixture, { OPENCODE_MCP_DELEGATE_WAIT_MS: "25", OPENCODE_MCP_WAIT_MS: "1200" })
   try {
     await client.connect(transport)
-    const delegated = await call(client, { name: "opencode_delegate", arguments: { task: "long fixture task" } })
+    const delegated = await call(client, { name: "opencode_delegate", arguments: { directory: process.cwd(), task: "long fixture task" } })
     const sessionID = delegated.structuredContent.session_id
     expect(delegated.structuredContent.state).toBe("running")
     const started = Date.now()
@@ -117,7 +116,7 @@ test("a timed-out message can be resumed through a new Node stdio process", asyn
   const second = fixtureClient(fixture, env)
   try {
     await first.client.connect(first.transport)
-    const delegated = await call(first.client, { name: "opencode_delegate", arguments: { task: "one" } })
+    const delegated = await call(first.client, { name: "opencode_delegate", arguments: { directory: process.cwd(), task: "one" } })
     const sessionID = delegated.structuredContent.session_id
     fixture.finish(sessionID)
     const message = await call(first.client, { name: "opencode_session", arguments: { action: "message", session_id: sessionID, text: "two" } })
@@ -142,7 +141,7 @@ test("stdio cancellation preserves a queued input and a new client recovers its 
   const second = fixtureClient(fixture, env)
   try {
     await first.client.connect(first.transport)
-    const delegated = await call(first.client, { name: "opencode_delegate", arguments: { task: "delayed" } })
+    const delegated = await call(first.client, { name: "opencode_delegate", arguments: { directory: process.cwd(), task: "delayed" } })
     expect(delegated.structuredContent.input_status).toBe("queued")
     const sessionID = delegated.structuredContent.session_id
     const cancel = await call(first.client, { name: "opencode_session", arguments: { action: "cancel", session_id: sessionID } })
