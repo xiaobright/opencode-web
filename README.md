@@ -149,15 +149,15 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 
 ## 把活派给免费模型：`mcp/`
 
-opencode 里那批免费模型（默认 `opencode/deepseek-v4.1-flash-free`，还有 MiMo / GLM / Big Pickle）只能在 opencode 里用。`mcp/` 是一个 stdio MCP server，把这批模型开放给任何支持 MCP 的 agent：派任务、等答复、看状态、增量取输出、续聊、取消，一共四个工具（`opencode_delegate` / `opencode_task` / `opencode_models` / `opencode_help`）。
+opencode 里那批免费模型只能在 opencode 里用。`mcp/` 是一个 stdio MCP server，把它开放给任何支持 MCP 的 agent：**两个工具**——`opencode_delegate { task, directory? }` 派活，`opencode_session { action, session_id, text? }` 查状态 / 等待 / 续聊 / 取消。模型、权限、调用方这些实现细节不进工具面，由服务端决定。
 
 ```json
 { "mcpServers": { "opencode": { "command": "node", "args": ["<repo>/mcp/index.mjs"] } } }
 ```
 
-它和网页端共用同一个后台服务（直接读 `service*.json`，不需要配地址和密码）；服务被自动休眠后，下次调用会自己拉起。委派跑的是真实的 opencode 会话，默认会话级预授权，所以无人值守也不会卡在工具审批上；任务的身份是 `session_id`，MCP 重启后照样能管理。
+它和网页端共用同一个后台服务（直接读 `service*.json`，不需要配地址和密码）；服务被自动休眠后，下次调用会自己拉起。委派跑的是真实的 opencode 会话，默认会话级预授权，所以无人值守也不会卡在工具审批上；任务的身份就是 `session_id`，MCP 重启后照样能管理。
 
-委派产生的会话会带上 `metadata.origin = opencode-delegate`，所以不会散落在各工作区里：侧栏顶部单独一个「后台任务」组（标注调用方与模型），图标栏心跳按钮带运行数角标；点开是监视页，按会话显示目录、模型、工具流程、token/成本，2.5 秒刷新；托盘右键菜单也会显示「后台任务：N 个在跑」，点击直接进监视页。完整说明、环境变量和测试见 `mcp/README.md`。
+**模型用哪个由网页决定**：侧栏图标栏的「模型顺序」面板列出免费模型，上下移动排序，排第一的就是下一次委派用的模型（存在 `.state/model-ranking.json`，MCP 读同一份）。委派产生的会话带 `metadata.origin = opencode-delegate`：侧栏单独一个「后台任务」组、图标栏心跳按钮带运行数角标、监视页显示目录/模型/工具流程、托盘右键菜单显示「后台任务：N 个在跑」。完整说明见 `mcp/README.md`。
 
 ## 注意
 

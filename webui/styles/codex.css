@@ -646,7 +646,7 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
 }
 
 /* 监视页：盖住右侧内容区，左侧给图标栏/侧栏让位；层级低于官方弹层（50）。 */
-.ocw-monitor {
+.ocw-panel {
   position: fixed;
   top: 0;
   right: 0;
@@ -659,11 +659,11 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   color: var(--v2-text-text-base);
 }
 
-.ocw-monitor[hidden] {
+.ocw-panel[hidden] {
   display: none;
 }
 
-.ocw-monitor-head {
+.ocw-panel-head {
   flex: none;
   display: flex;
   align-items: center;
@@ -672,31 +672,31 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   padding: 18px 24px 12px;
 }
 
-.ocw-monitor-heading {
+.ocw-panel-heading {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
 
-.ocw-monitor-title {
+.ocw-panel-title {
   font-size: 18px;
   font-weight: 600;
 }
 
-.ocw-monitor-count {
+.ocw-panel-count {
   color: var(--v2-text-text-faint);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.ocw-monitor-sub {
+.ocw-panel-sub {
   flex: none;
   padding: 0 24px 14px;
   color: var(--v2-text-text-muted);
   font-size: 12px;
 }
 
-.ocw-monitor-body {
+.ocw-panel-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -704,7 +704,7 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   overscroll-behavior: contain;
 }
 
-.ocw-monitor-list {
+.ocw-panel-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -835,4 +835,98 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   color: var(--v2-text-text-faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 模型顺序：免费模型的排序表，排第一的就是下一次委派会用的那个 */
+.ocw-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 10px;
+  background: var(--v2-background-bg-layer-01);
+}
+
+.ocw-model.is-first {
+  border-color: var(--v2-border-border-strong);
+}
+
+.ocw-model-rank {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  color: var(--v2-text-text-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ocw-model-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ocw-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.ocw-model-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--v2-text-text-faint);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.ocw-model-badge {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-text-text-muted);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.ocw-model-move {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.ocw-model-move button {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--v2-icon-icon-muted);
+  cursor: pointer;
+}
+
+.ocw-model-move button:hover:not(:disabled) {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-icon-icon-base);
+}
+
+.ocw-model-move button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.ocw-panel-status {
+  flex: none;
+  padding: 8px 24px 12px;
+  color: var(--v2-text-text-faint);
+  font-size: 12px;
 }

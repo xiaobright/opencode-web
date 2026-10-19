@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Stdio MCP server: delegates work to the local opencode background service and its
-// free models. stdout carries the protocol; every diagnostic goes to stderr.
+// Stdio MCP server: delegates work to the local opencode background service.
+// stdout carries the protocol; every diagnostic goes to stderr.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
@@ -8,22 +8,19 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 import * as api from "./opencode.mjs"
 import { createTools } from "./tools.mjs"
-import { DelegationStore } from "./tasks.mjs"
 
-const tools = createTools({
-  api,
-  store: new DelegationStore({ path: process.env.OPENCODE_MCP_STATE_PATH }),
-})
+const tools = createTools({ api })
 
 const server = new Server(
-  { name: "opencode-delegate", version: "0.1.0" },
+  { name: "opencode-delegate", version: "0.2.0" },
   {
     capabilities: { tools: {} },
+    // Only what a caller needs to use the server. How it picks a model, which
+    // permissions it grants and where it keeps state is not the caller's business.
     instructions:
-      "Delegate work to the local opencode background service and its free models. " +
-      "Start with opencode_delegate (mode=sync waits for the answer, async returns a task id); " +
-      'manage with opencode_task action="list" | "status" | "wait" | "output" | "message" | "cancel". ' +
-      "Free models: opencode_models. Help: opencode_help.",
+      "Run tasks on the local opencode service and talk to them like a subagent. " +
+      'opencode_delegate { task, directory? } starts one and returns its answer, or its session id while running. ' +
+      'opencode_session { action: status | wait | message | cancel, session_id } checks it, waits, sends follow-ups or stops it.',
   },
 )
 
@@ -61,4 +58,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
-console.error(`[opencode-delegate] ready (state ${process.env.OPENCODE_MCP_STATE_PATH ?? "default"})`)
+console.error("[opencode-delegate] ready")

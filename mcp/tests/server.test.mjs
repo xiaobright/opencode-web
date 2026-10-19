@@ -12,7 +12,7 @@ import { startFixture } from "./fixture.mjs"
 
 const entry = fileURLToPath(new URL("../index.mjs", import.meta.url))
 
-test("stdio server exposes four tools and delegates through a discovered service", async () => {
+test("stdio server exposes two tools and delegates through a discovered service", async () => {
   const fixture = await startFixture()
   const root = mkdtempSync(join(tmpdir(), "ocw-mcp-proto-"))
   const stateHome = join(root, "state")
@@ -26,7 +26,6 @@ test("stdio server exposes four tools and delegates through a discovered service
       ...process.env,
       XDG_STATE_HOME: stateHome,
       OPENCODE_BIN: join(root, "no-such-opencode.exe"),
-      OPENCODE_MCP_STATE_PATH: join(root, "tasks.json"),
       OPENCODE_MCP_DIRECTORY: process.cwd(),
     },
     stderr: "pipe",
@@ -37,30 +36,23 @@ test("stdio server exposes four tools and delegates through a discovered service
     await client.connect(transport)
 
     const listed = await client.listTools()
-    expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
-      "opencode_delegate",
-      "opencode_help",
-      "opencode_models",
-      "opencode_task",
-    ])
+    expect(listed.tools.map((tool) => tool.name).sort()).toEqual(["opencode_delegate", "opencode_session"])
     for (const tool of listed.tools) expect(tool.inputSchema.type).toBe("object")
 
-    const models = await client.callTool({ name: "opencode_models", arguments: {} })
-    expect(models.content[0].text).toContain("deepseek-v4.1-flash-free")
-
-    const delegated = await client.callTool({
-      name: "opencode_delegate",
-      arguments: { task: "say pong", timeout_ms: 5_000 },
-    })
+    const delegated = await client.callTool({ name: "opencode_delegate", arguments: { task: "say pong" } })
     expect(delegated.isError).toBeFalsy()
     expect(delegated.structuredContent.state).toBe("done")
     expect(delegated.structuredContent.text).toBe("PONG.")
+    const sessionID = delegated.structuredContent.session_id
 
-    const status = await client.callTool({
-      name: "opencode_task",
-      arguments: { action: "status", session_id: delegated.structuredContent.sessionID },
-    })
+    const status = await client.callTool({ name: "opencode_session", arguments: { action: "status", session_id: sessionID } })
     expect(status.structuredContent.state).toBe("done")
+
+    const followUp = await client.callTool({
+      name: "opencode_session",
+      arguments: { action: "message", session_id: sessionID, text: "again" },
+    })
+    expect(followUp.structuredContent.state).toBe("done")
 
     const failed = await client.callTool({ name: "opencode_delegate", arguments: { task: "x", bogus: 1 } })
     expect(failed.isError).toBe(true)

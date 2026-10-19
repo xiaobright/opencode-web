@@ -119,6 +119,11 @@
     chevron: '<path d="m9 5.5 6.5 6.5L9 18.5"/>',
     // 心跳线：后台任务监视（MCP 委派出去的会话）
     pulse: '<path d="M2.8 12h3.3l2.2-5.6 4.2 11.2 2.3-5.6h6.4"/>',
+    // 叠层：免费模型的排序
+    layers: '<path d="m12 3.6 8.4 4.6-8.4 4.6L3.6 8.2z"/><path d="m3.6 12.4 8.4 4.6 8.4-4.6"/><path d="m3.6 16.6 8.4 4.6 8.4-4.6"/>',
+    up: '<path d="m6 14.5 6-6.5 6 6.5"/>',
+    down: '<path d="m6 9.5 6 6.5 6-6.5"/>',
+    refresh: '<path d="M19.6 12a7.6 7.6 0 1 1-2.3-5.4"/><path d="M19.6 4.6V10H14"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
   }
 
@@ -185,6 +190,7 @@
     backgroundBadge.hidden = true
     backgroundButton.appendChild(backgroundBadge)
     top.appendChild(backgroundButton)
+    top.appendChild(railButton("layers", "模型顺序", "models", openModels))
     bottom.appendChild(railButton("sun", "切换明暗主题", "theme", toggleTheme))
     bottom.appendChild(railButton("settings", "设置", "settings", function () { go("/settings") }))
 
@@ -883,21 +889,21 @@
   function ensureMonitor() {
     if (monitor && monitor.isConnected) return monitor
 
-    var panel = el("div", "ocw-monitor")
+    var panel = el("div", "ocw-panel ocw-monitor")
     panel.id = "ocw-monitor"
     panel.hidden = true
     panel.innerHTML =
-      '<header class="ocw-monitor-head">' +
-      '<div class="ocw-monitor-heading">' +
-      '<span class="ocw-monitor-title">后台任务</span>' +
-      '<span class="ocw-monitor-count"></span>' +
+      '<header class="ocw-panel-head">' +
+      '<div class="ocw-panel-heading">' +
+      '<span class="ocw-panel-title">后台任务</span>' +
+      '<span class="ocw-panel-count"></span>' +
       "</div>" +
       '<button type="button" class="ocw-icon-btn" data-monitor-close aria-label="关闭监视页">' +
       icon("x", 16) +
       "</button>" +
       "</header>" +
-      '<div class="ocw-monitor-sub"></div>' +
-      '<div class="ocw-monitor-body"><div class="ocw-monitor-list"></div></div>'
+      '<div class="ocw-panel-sub"></div>' +
+      '<div class="ocw-panel-body"><div class="ocw-panel-list"></div></div>'
     panel.querySelector("[data-monitor-close]").addEventListener("click", closeMonitor)
     ;(document.body || document.documentElement).appendChild(panel)
     monitor = panel
@@ -905,6 +911,7 @@
   }
 
   function openMonitor() {
+    closeModels()
     var panel = ensureMonitor()
     if (!panel.hidden) {
       refreshMonitor()
@@ -912,8 +919,8 @@
     }
     panel.hidden = false
     document.documentElement.setAttribute("data-ocw-monitor", "")
-    panel.querySelector(".ocw-monitor-list").textContent = ""
-    panel.querySelector(".ocw-monitor-list").appendChild(message("正在读取后台任务…"))
+    panel.querySelector(".ocw-panel-list").textContent = ""
+    panel.querySelector(".ocw-panel-list").appendChild(message("正在读取后台任务…"))
     refreshMonitor()
     if (monitorTimer) clearInterval(monitorTimer)
     monitorTimer = setInterval(refreshMonitor, 2500)
@@ -969,13 +976,13 @@
     var running = items.filter(function (session) {
       return active[session.id]
     }).length
-    monitor.querySelector(".ocw-monitor-count").textContent = items.length ? String(items.length) : ""
-    monitor.querySelector(".ocw-monitor-sub").textContent =
+    monitor.querySelector(".ocw-panel-count").textContent = items.length ? String(items.length) : ""
+    monitor.querySelector(".ocw-panel-sub").textContent =
       "MCP 委派 · " +
       (running ? running + " 个在运行" : "当前没有运行中的任务") +
       " · 每 2.5 秒刷新"
 
-    var list = monitor.querySelector(".ocw-monitor-list")
+    var list = monitor.querySelector(".ocw-panel-list")
     list.textContent = ""
     if (!items.length) {
       list.appendChild(message("还没有后台任务。用 MCP 委派后，这里会按会话显示运行状态、目录和工具流程。"))
@@ -1051,6 +1058,157 @@
     return card
   }
 
+  /* ── 模型顺序 ─────────────────────────────────────────────────────────
+     免费模型的排序表，排第一的就是下一次委派会用的模型。排序存在
+     .state/model-ranking.json（网页写、MCP 读），这里只负责编辑它。 */
+  var modelsPanel = null
+  var modelsState = { items: [], saved: "", available: false }
+
+  function ensureModelsPanel() {
+    if (modelsPanel && modelsPanel.isConnected) return modelsPanel
+
+    var panel = el("div", "ocw-panel ocw-models")
+    panel.id = "ocw-models"
+    panel.hidden = true
+    panel.innerHTML =
+      '<header class="ocw-panel-head">' +
+      '<div class="ocw-panel-heading">' +
+      '<span class="ocw-panel-title">模型顺序</span>' +
+      '<span class="ocw-panel-count"></span>' +
+      "</div>" +
+      '<button type="button" class="ocw-icon-btn" data-models-refresh aria-label="刷新模型列表">' +
+      icon("refresh", 16) +
+      "</button>" +
+      '<button type="button" class="ocw-icon-btn" data-models-close aria-label="关闭">' +
+      icon("x", 16) +
+      "</button>" +
+      "</header>" +
+      '<div class="ocw-panel-sub"></div>' +
+      '<div class="ocw-panel-body"><div class="ocw-panel-list"></div></div>' +
+      '<div class="ocw-panel-status"></div>'
+    panel.querySelector("[data-models-close]").addEventListener("click", closeModels)
+    panel.querySelector("[data-models-refresh]").addEventListener("click", function () {
+      void loadModels()
+    })
+    ;(document.body || document.documentElement).appendChild(panel)
+    modelsPanel = panel
+    return panel
+  }
+
+  function openModels() {
+    closeMonitor()
+    var panel = ensureModelsPanel()
+    panel.hidden = false
+    document.documentElement.setAttribute("data-ocw-models", "")
+    void loadModels()
+  }
+
+  function closeModels() {
+    if (modelsPanel) modelsPanel.hidden = true
+    document.documentElement.removeAttribute("data-ocw-models")
+  }
+
+  async function loadModels() {
+    if (!modelsPanel) return
+    renderModels("正在读取模型列表…")
+    try {
+      var response = await fetch("/__opencode-web/models", { headers: { accept: "application/json" } })
+      var data = await response.json()
+      modelsState.items = Array.isArray(data.models) ? data.models : []
+      modelsState.available = Boolean(data.available)
+      modelsState.saved = ""
+      renderModels(modelsState.available ? "" : "后台服务未运行，读不到模型列表。打开一个会话后点刷新。")
+    } catch (error) {
+      modelsState.items = []
+      renderModels("读取失败：" + ((error && error.message) || error))
+    }
+  }
+
+  function modelRefOf(model) {
+    return model.providerID + "/" + model.id
+  }
+
+  function moveModel(index, delta) {
+    var items = modelsState.items.slice()
+    var target = index + delta
+    if (target < 0 || target >= items.length) return
+    var moved = items.splice(index, 1)[0]
+    items.splice(target, 0, moved)
+    modelsState.items = items
+    renderModels("")
+    void saveRanking(items)
+  }
+
+  async function saveRanking(items) {
+    try {
+      var response = await fetch("/__opencode-web/models", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ ranking: items.map(modelRefOf) }),
+      })
+      modelsState.saved = response.ok ? "已保存 · 下一次委派生效" : "保存失败（HTTP " + response.status + "）"
+    } catch (error) {
+      modelsState.saved = "保存失败：" + ((error && error.message) || error)
+    }
+    renderModels("")
+  }
+
+  function renderModels(notice) {
+    var panel = modelsPanel
+    if (!panel) return
+    panel.querySelector(".ocw-panel-count").textContent = modelsState.items.length ? String(modelsState.items.length) : ""
+    panel.querySelector(".ocw-panel-sub").textContent = "排第一的会被新委派使用 · 数据来自 opencode · 调整后立即生效"
+    var list = panel.querySelector(".ocw-panel-list")
+    list.textContent = ""
+    if (modelsState.items.length === 0) list.appendChild(message(notice || "没有可用的免费模型。"))
+    else
+      modelsState.items.forEach(function (model, index) {
+        list.appendChild(modelRow(model, index))
+      })
+    panel.querySelector(".ocw-panel-status").textContent = modelsState.saved || notice || ""
+  }
+
+  function modelRow(model, index) {
+    var row = el("div", "ocw-model")
+    if (index === 0) row.classList.add("is-first")
+    row.appendChild(el("span", "ocw-model-rank", String(index + 1)))
+
+    var main = el("div", "ocw-model-main")
+    var name = el("span", "ocw-model-name")
+    name.textContent = model.name || model.id
+    var meta = el("span", "ocw-model-meta")
+    meta.textContent = [modelRefOf(model), model.context ? Math.round(model.context / 1000) + "k ctx" : "", "tools"]
+      .filter(Boolean)
+      .join(" · ")
+    main.appendChild(name)
+    main.appendChild(meta)
+    row.appendChild(main)
+
+    if (index === 0) row.appendChild(el("span", "ocw-model-badge", "首选"))
+
+    var move = el("div", "ocw-model-move")
+    var up = el("button", "", icon("up", 14))
+    up.type = "button"
+    up.title = "上移"
+    up.setAttribute("aria-label", "上移")
+    up.disabled = index === 0
+    up.addEventListener("click", function () {
+      moveModel(index, -1)
+    })
+    var down = el("button", "", icon("down", 14))
+    down.type = "button"
+    down.title = "下移"
+    down.setAttribute("aria-label", "下移")
+    down.disabled = index === modelsState.items.length - 1
+    down.addEventListener("click", function () {
+      moveModel(index, 1)
+    })
+    move.appendChild(up)
+    move.appendChild(down)
+    row.appendChild(move)
+    return row
+  }
+
   function message(text) {
     var node = el("div", "ocw-empty")
     node.textContent = text
@@ -1092,18 +1250,22 @@
     build()
     void refresh()
 
-    // 托盘菜单用 ?ocw=background 直接打开监视页；打开后把参数从地址栏摘掉。
-    if (/[?&]ocw=background/.test(location.search)) {
+    // 托盘菜单用 ?ocw=background 打开监视页；模型顺序用 ?ocw=models。打开后把参数摘掉。
+    var panel = new URLSearchParams(location.search).get("ocw")
+    if (panel) {
       try {
         history.replaceState(null, "", location.pathname + location.hash)
       } catch (error) {
         void error
       }
-      openMonitor()
+      if (panel === "background") openMonitor()
+      if (panel === "models") openModels()
     }
 
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && monitor && !monitor.hidden) closeMonitor()
+      if (event.key !== "Escape") return
+      if (monitor && !monitor.hidden) closeMonitor()
+      if (modelsPanel && !modelsPanel.hidden) closeModels()
     })
 
     // 活动状态推送一来就点灯/熄灯（activity-model.js 按文件名顺序先于本脚本加载）

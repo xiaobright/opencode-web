@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url"
 import { authorization } from "./service.mjs"
 import { autoSleep, idleVerdict } from "./idle.mjs"
 import { createBackend } from "./backend.mjs"
+import { modelRef, normalizeModel, rankModels, readRanking, selectModel, usableModels, writeRanking } from "./models.mjs"
 
 const sourceDir = fileURLToPath(new URL(".", import.meta.url))
 const loadingFiles = new Map([
@@ -138,6 +139,44 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
     }
   }
 
+  function json(response, status, body) {
+    response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" })
+    response.end(JSON.stringify(body))
+  }
+
+  // Which free model delegations use is an operator setting, edited in the web UI. This
+  // endpoint reads the live catalog and the stored ranking; the MCP server reads the same
+  // file, so the first row in the page is what the next delegation actually picks.
+  async function models(response) {
+    const ranking = readRanking()
+    const models = await catalog()
+    const ranked = rankModels(usableModels(models), ranking)
+    const selected = selectModel(models, ranking)
+    json(response, 200, {
+      ok: true,
+      available: models.length > 0,
+      models: ranked,
+      ranking,
+      selected: selected ? modelRef(selected) : null,
+    })
+  }
+
+  async function catalog() {
+    try {
+      const found = await backend.discover()
+      if (!found) return []
+      const response = await fetch(`${found.url}/api/model`, {
+        headers: { authorization: authorization(found) },
+        signal: AbortSignal.timeout(5_000),
+      })
+      if (!response.ok) return []
+      const body = await response.json()
+      return Array.isArray(body?.data) ? body.data.map(normalizeModel) : []
+    } catch {
+      return []
+    }
+  }
+
   return createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost")
 
@@ -162,6 +201,26 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
             : {}),
         }),
       )
+
+    // The web UI's model ranking: read the live catalog + stored order, or save an order.
+    // The MCP server reads the same file, so this page and the next delegation agree.
+    if (url.pathname === "/__opencode-web/models") {
+      if (request.method === "GET") return void (await models(response))
+      if (request.method === "POST") {
+        if (request.headers.origin !== `http://${request.headers.host}` || request.headers["sec-fetch-site"] === "cross-site")
+          return void end(response, 403)
+        let body
+        try {
+          body = JSON.parse(await readBody(request, 64 * 1024))
+        } catch {
+          return void end(response, 400)
+        }
+        if (!Array.isArray(body?.ranking) || body.ranking.some((ref) => typeof ref !== "string"))
+          return void end(response, 400)
+        return void json(response, 200, { ok: true, ranking: writeRanking(body.ranking) })
+      }
+      return void end(response, 405, { allow: "GET, POST" })
+    }
 
     // Opening a page is the activation step; probes, icons and assets cannot
     // start OpenCode. A same-origin POST from the loading page shares startup.
@@ -213,6 +272,17 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
 
     return void proxy(request, response, log, shell, inject, () => lazy ? backend.discover() : backend.start())
   })
+}
+
+async function readBody(request, limit) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of request) {
+    size += chunk.length
+    if (size > limit) throw new Error("request body too large")
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString("utf8")
 }
 
 async function proxy(request, response, log, shell, overlay, resolveBackend) {

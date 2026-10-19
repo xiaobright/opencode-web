@@ -196,7 +196,10 @@ export function fixtureApi(module, url) {
   return {
     ...module,
     request: call,
-    createSession: async (input) => (await call("/api/session", { method: "POST", body: input })).data,
+    // Mirror the real client: the tool layer passes a directory, the client turns it into
+    // the location the session API expects.
+    createSession: async (input) =>
+      (await call("/api/session", { method: "POST", body: { ...input, location: input.location ?? { directory: input.directory } } })).data,
     prompt: async (sessionID, text) => (await call(`/api/session/${sessionID}/prompt`, { method: "POST", body: { text } })).data,
     messages: async (sessionID, limit = 100) => (await call(`/api/session/${sessionID}/message?limit=${limit}`)).data,
     sessionInfo: async (sessionID) => (await call(`/api/session/${sessionID}`)).data,

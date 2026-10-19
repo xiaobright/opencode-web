@@ -8,6 +8,9 @@
 import { existsSync, statSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
 import { resolve } from "../src/service.mjs"
+import { normalizeModel } from "../src/models.mjs"
+
+export { normalizeModel }
 
 const CONNECTION_TTL_MS = 5_000
 
@@ -129,64 +132,6 @@ export async function wait(sessionID, timeoutMs) {
 export async function catalog() {
   const body = await request("/api/model")
   return Array.isArray(body?.data) ? body.data.map(normalizeModel) : []
-}
-
-export function normalizeModel(model) {
-  const cost = Array.isArray(model.cost) ? model.cost : []
-  return {
-    id: model.modelID ?? model.id,
-    providerID: model.providerID,
-    name: model.name ?? model.modelID ?? model.id,
-    context: model.limit?.context ?? null,
-    tools: Boolean(model.capabilities?.tools),
-    free: cost.length > 0 && cost.every((entry) => (entry.input ?? 0) === 0 && (entry.output ?? 0) === 0),
-    status: model.status ?? "unknown",
-    enabled: model.enabled !== false,
-  }
-}
-
-/**
- * Accepts "provider/modelID" or a bare "modelID" (opencode provider wins a tie).
- * Returns the Model.Ref the session API expects.
- */
-export function parseModelRef(ref, models) {
-  const text = String(ref ?? "").trim()
-  if (!text) throw new Error("model must not be empty")
-
-  const slash = text.indexOf("/")
-  if (slash > 0) {
-    const providerID = text.slice(0, slash)
-    const id = text.slice(slash + 1)
-    const found = models.find((model) => model.providerID === providerID && model.id === id)
-    if (!found) throw new Error(`unknown model ${text}; run opencode_models to list available models`)
-    return { providerID, id }
-  }
-
-  const matches = models.filter((model) => model.id === text || model.name === text)
-  const found = matches.find((model) => model.providerID === "opencode") ?? matches[0]
-  if (!found) throw new Error(`unknown model ${text}; run opencode_models to list available models`)
-  return { providerID: found.providerID, id: found.id }
-}
-
-export function freeModels(models) {
-  return models.filter((model) => model.free && model.enabled && model.tools)
-}
-
-/** The default free model, with a fallback when the pinned one disappears from the catalog. */
-export function defaultModel(models, preferred) {
-  const free = freeModels(models)
-  const wanted = preferred ? parseModelRefOrUndefined(preferred, models) : undefined
-  if (wanted) return wanted
-  if (free.length > 0) return { providerID: free[0].providerID, id: free[0].id }
-  throw new Error("no free tool-capable model is available; run opencode_models to inspect the catalog")
-}
-
-function parseModelRefOrUndefined(ref, models) {
-  try {
-    return parseModelRef(ref, models)
-  } catch {
-    return undefined
-  }
 }
 
 export function normalizeDirectory(directory) {
