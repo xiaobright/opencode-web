@@ -2,6 +2,31 @@
 // Route/shape checks establish API availability, not exactly-once tool side effects.
 export const BASELINE = "654b79b"
 
+/** Cache successful capability probes per service identity; concurrent callers share one read. */
+export function contractCache(load, { now = Date.now, ttlMs = 600_000 } = {}) {
+  const entries = new Map()
+  return async (target, { force = false } = {}) => {
+    const key = JSON.stringify([target.url, target.authorization, target.version, target.pid])
+    const previous = entries.get(key)
+    if (previous?.pending) return previous.pending
+    if (!force && previous && now() - previous.at < ttlMs) return previous.value
+    const entry = {}
+    entry.pending = Promise.resolve().then(() => load(target)).then(inspectContract)
+    entries.set(key, entry)
+    while (entries.size > 4) entries.delete(entries.keys().next().value)
+    try {
+      entry.value = await entry.pending
+      entry.at = now()
+      return entry.value
+    } catch (error) {
+      if (entries.get(key) === entry) entries.delete(key)
+      throw error
+    } finally {
+      delete entry.pending
+    }
+  }
+}
+
 function dereference(document, schema) {
   const seen = new Set()
   while (schema?.$ref?.startsWith("#/")) {
@@ -34,7 +59,9 @@ export function inspectContract(document) {
     ["/api/experimental/session/{sessionID}/wait", "post"],
     ["/api/model", "get"],
   ]) requireRoute(path, method)
-  for (const [path, fields] of [["/api/session", ["id", "metadata", "location"]], ["/api/session/{sessionID}/prompt", ["id", "metadata", "delivery", "resume"]]]) {
+  // Session ids are service-minted (caller-supplied ones failed free-model acceptance); the input
+  // id is ours, which is what makes a retried prompt idempotent.
+  for (const [path, fields] of [["/api/session", ["metadata", "location"]], ["/api/session/{sessionID}/prompt", ["id", "metadata", "delivery", "resume"]]]) {
     const operation = requireRoute(path, "post")
     const body = dereference(document, operation?.requestBody)
     const fieldsPresent = properties(document, body?.content?.["application/json"]?.schema)

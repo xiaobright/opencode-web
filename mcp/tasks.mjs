@@ -46,6 +46,15 @@ export function lastTurn(messagesNewestFirst) {
 
 const OUTCOMES = { succeeded: "done", failed: "failed", interrupted: "cancelled" }
 
+function inputError(error) {
+  if (!error || typeof error !== "object") return undefined
+  return {
+    type: typeof error.type === "string" ? error.type.slice(0, 100) : "unknown",
+    message: typeof error.message === "string" ? error.message.slice(0, 1000) : "Execution failed without a message",
+    ...(Number.isInteger(error.status) ? { status: error.status } : {}),
+  }
+}
+
 /** State of the last run, from the newest idle marker unless the loop is running now. */
 export function stateFromMessages(messagesNewestFirst, { active = false, pending = 0 } = {}) {
   if (active) return "running"
@@ -104,8 +113,10 @@ export async function latestInput(api, sessionID) {
   if (queued) return queued.id
   const users = await api.messagePage(sessionID, { type: "user", limit: 1 })
   // User.time.created is delivery time, Inbox.time.created is admission time; they
-  // cannot be sorted together to reconstruct a global admission sequence.
-  return users.data[0]?.id
+  // cannot be sorted together to reconstruct a global admission sequence. Filter here
+  // too: an ignored `type` query must not hand back an idle/assistant id as the input.
+  const newest = users.data.find((item) => item.type === "user")
+  return newest?.id
 }
 
 /** Inbox, persisted delivery/idle boundaries and live process ownership are separate facts. */
@@ -140,6 +151,7 @@ export async function readSnapshot(api, sessionID, inputID) {
     state, messages, inputID, inputStatus, pending: pending.length, historyTruncated,
     lastOutcome: lastIdle?.outcome,
     inputOutcome: boundary?.outcome,
+    inputError: inputError(boundary?.error),
   }
 }
 

@@ -18,11 +18,9 @@ const server = new Server(
     // Only what a caller needs to use the server. How it picks a model, which
     // permissions it grants and where it keeps state is not the caller's business.
     instructions:
-      "Run tasks on the local opencode service and talk to them like a subagent. " +
-      'opencode_delegate { task, directory? } starts one and returns its answer, or its session id while running. ' +
-      'opencode_session { action: status | wait | message | cancel, session_id, text? } checks it, waits, steers with a follow-up, or interrupts active execution. ' +
-      'Responses distinguish admitted Inbox inputs from delivered and settled inputs. cancel retains queued inputs; wait does not resume parked work. ' +
-      'Concurrent steers may share an execution and its answer. Reconnecting recovers the latest durable input. Never resubmit solely because a call timed out.',
+      "Delegate tasks and continue them by session_id. Track your input with input_status and input_outcome. " +
+      "wait observes without resuming paused work; cancel interrupts execution and retains pending inputs. " +
+      "After a timeout, check or wait on the existing session before resubmitting.",
   },
 )
 

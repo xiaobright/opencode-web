@@ -45,9 +45,9 @@ export const DEFAULT_MODELS = [
 
 export const BASELINE_DOCUMENT = JSON.parse(readFileSync(new URL('./openapi-baseline.json', import.meta.url), 'utf8'))
 
-export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded"], replyDelayMs = 5, deliveryDelayMs = 0, models = DEFAULT_MODELS, progressMode = false, diffFiles = [], dropResponses = {}, instructions = true, document = BASELINE_DOCUMENT } = {}) {
+export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded"], errors = [], replyDelayMs = 5, deliveryDelayMs = 0, models = DEFAULT_MODELS, progressMode = false, diffFiles = [], dropResponses = {}, instructions = true, document = BASELINE_DOCUMENT } = {}) {
   const sessions = new Map()
-  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, messageReads: 0, promptTexts: [], deliveries: [], instructionWrites: 0 }
+  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, createBodies: [], openapiReads: 0, messageReads: 0, promptTexts: [], deliveries: [], instructionWrites: 0 }
   const waiters = new Map()
   const timers = new Set()
   const drops = { ...dropResponses }
@@ -97,7 +97,7 @@ export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded
     session.running = false
     const now = Date.now()
     if (outcome === "succeeded") session.messages.push({ id: `msg_${randomUUID()}`, type: "assistant", time: { created: now, completed: now }, content: [{ type: "text", text: replies[Math.min(session.turns - 1, replies.length - 1)] }], finish: "stop" })
-    session.messages.push({ id: `msg_${randomUUID()}`, type: "idle", outcome, time: { created: now } })
+    session.messages.push({ id: `msg_${randomUUID()}`, type: "idle", outcome, error: outcome === "failed" ? errors[Math.min(session.turns - 1, errors.length - 1)] : undefined, time: { created: now } })
     if (outcome === "succeeded" && session.inbox.size) wake(session)
     else release(session)
   }
@@ -113,12 +113,17 @@ export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded
       for await (const chunk of request) chunks.push(chunk)
       return JSON.parse(Buffer.concat(chunks).toString() || "{}")
     }
-    if (url.pathname === "/openapi.json") return json(200, contract)
+    if (url.pathname === "/openapi.json") {
+      state.openapiReads++
+      if (drop("openapi", request)) return
+      return json(200, contract)
+    }
     if (url.pathname === "/api/info") return json(200, { version: "fixture", pid: process.pid })
     if (url.pathname === "/api/model") return json(200, { data: models })
     if (url.pathname === "/api/session/active") return json(200, { data: Object.fromEntries([...sessions.values()].filter((item) => item.running).map((item) => [item.id, { type: "running" }])) })
     if (request.method === "POST" && url.pathname === "/api/session") {
       const input = await read()
+      state.createBodies.push(input)
       const id = input.id ?? `ses_${randomUUID()}`
       if (!sessions.has(id)) {
         sessions.set(id, { ...input, id, running: false, turns: 0, messages: [], inbox: new Map(), admitted: new Map(), instructions: {} })

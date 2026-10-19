@@ -281,6 +281,43 @@ test("parked input never inherits the previous success, and wait does not resume
   expect(result.structured.text).toBeUndefined()
 })
 
+for (const resume of [false, true]) {
+  test(`settled input returns its answer while another input is ${resume ? "running" : "parked"}`, async () => {
+    const { api, env, fixture } = await setup({ replies: ["COMPLETED_ANSWER"], replyDelayMs: 60_000 })
+    const tools = createTools({ env, api: { ...api, wait: async (id, ms) => {
+      fixture.deliver(id)
+      fixture.finish(id)
+      const waited = await api.wait(id, ms)
+      await api.prompt(id, "another input", { delivery: "queue", resume })
+      return waited
+    } } })
+    const result = await tools.opencode_delegate.handler({ task: "first input" })
+    expect(result.structured.state).toBe(resume ? "running" : "queued")
+    expect(result.structured.input_status).toBe("settled")
+    expect(result.structured.input_outcome).toBe("succeeded")
+    expect(result.structured.text).toBe("COMPLETED_ANSWER")
+    expect(result.text).toContain("COMPLETED_ANSWER")
+  })
+}
+
+test("failed inputs expose bounded diagnostics in delegate, status and wait without leaking response bodies", async () => {
+  const error = { type: "provider.auth", status: 403, message: "AUTH_DENIED " + "x".repeat(1500), response: { body: "PRIVATE_PROVIDER_BODY" } }
+  const { tools } = await setup({ outcomes: ["failed", "succeeded"], errors: [error] })
+  const first = await tools.opencode_delegate.handler({ task: "first input" })
+  const args = { session_id: first.structured.session_id }
+  for (const result of [first, await tools.opencode_session.handler({ ...args, action: "status" }), await tools.opencode_session.handler({ ...args, action: "wait" })]) {
+    expect(result.structured.input_error.type).toBe("provider.auth")
+    expect(result.structured.input_error.status).toBe(403)
+    expect(result.structured.input_error.message.length).toBe(1000)
+    expect(result.text).toContain("Error: provider.auth (403): AUTH_DENIED")
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_PROVIDER_BODY")
+  }
+  const next = await tools.opencode_session.handler({ ...args, action: "message", text: "next input" })
+  expect(next.structured.state).toBe("done")
+  expect(next.structured.input_error).toBeUndefined()
+  expect(next.text).not.toContain("AUTH_DENIED")
+})
+
 test("concurrent steers share the next idle boundary and exclude earlier or later execution output", async () => {
   const { tools, api, fixture } = await setup({ replyDelayMs: 60_000, env: { OPENCODE_MCP_DELEGATE_WAIT_MS: "20", OPENCODE_MCP_WAIT_MS: "20" } })
   const first = await tools.opencode_delegate.handler({ task: "one" })
@@ -305,8 +342,7 @@ test("concurrent steers share the next idle boundary and exclude earlier or late
 
 test("stable admission IDs adopt the first payload, including after delivery", async () => {
   const { api, fixture } = await setup({ replyDelayMs: 60_000 })
-  const id = "ses_stable"
-  await Promise.all([api.createSession({ id, title: "first", directory: process.cwd() }), api.createSession({ id, title: "second", directory: process.cwd() })])
+  const { id } = await api.createSession({ title: "stable", directory: process.cwd() })
   const [first, retry] = await Promise.all([
     api.prompt(id, "first", { id: "msg_stable", metadata: { origin: "first" }, delivery: "queue", resume: false }),
     api.prompt(id, "second", { id: "msg_stable", metadata: { origin: "second" }, delivery: "steer", resume: false }),
@@ -324,6 +360,14 @@ test("stable admission IDs adopt the first payload, including after delivery", a
   expect(fixture.state.prompts).toBe(1)
   const another = await api.createSession({ directory: process.cwd() })
   await expect(api.prompt(another.id, "conflict", { id: "msg_stable", resume: false })).rejects.toThrow("409")
+})
+
+test("the service mints session ids, and a lost create response is reported instead of retried", async () => {
+  const { api, fixture } = await setup({ dropResponses: { create: 1 } })
+  await expect(api.createSession({ title: "lost", directory: process.cwd() })).rejects.toThrow(/list sessions before creating another/)
+  // The dropped response still left one session behind: retrying would have made two.
+  expect([...fixture.sessions.keys()]).toHaveLength(1)
+  expect(fixture.state.created).toBe(1)
 })
 
 test("a long execution pages back to its input; missing history returns unknown, never another answer", async () => {

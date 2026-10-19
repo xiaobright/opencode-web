@@ -10,7 +10,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path"
 import { resolve } from "../src/service.mjs"
 import { normalizeModel } from "../src/models.mjs"
 import { randomUUID } from "node:crypto"
-import { inspectContract } from "./compatibility.mjs"
+import { contractCache, inspectContract } from "./compatibility.mjs"
 
 export { normalizeModel }
 
@@ -26,6 +26,8 @@ export async function connection({ force = false } = {}) {
   cached = {
     url: found.url,
     authorization: `Basic ${Buffer.from(`opencode:${found.password}`).toString("base64")}`,
+    version: found.info?.version,
+    pid: found.info?.pid,
   }
   cachedAt = Date.now()
   return cached
@@ -73,29 +75,28 @@ export async function request(path, options = {}) {
       throw new Error(`${method} ${path}: connection lost; the request may have been accepted and was not retried. Check the session before submitting again.`, { cause: error })
     // The service was restarted or auto-slept between calls; resolve once more.
     const next = await connection({ force: true })
-    if (options.contract) await checkTarget(next)
+    if (options.contract) await checkTarget(next, { force: true })
     return await fetchOnce(next, path, options)
   }
 }
 
-let checkedTarget
-async function checkTarget(target) {
-  if (checkedTarget?.url === target.url && checkedTarget.authorization === target.authorization && Date.now() - checkedTarget.at < CONNECTION_TTL_MS) return
-  inspectContract(await fetchOnce(target, "/openapi.json"))
-  checkedTarget = { ...target, at: Date.now() }
-}
+const checkTarget = contractCache((target) => fetchOnce(target, "/openapi.json"))
 
 const sessionPath = (sessionID, suffix = "") => `/api/session/${encodeURIComponent(sessionID)}${suffix}`
 
 /** Inject only HTTP transport in tests; route, payload and retry policy stay production code. */
 export function createApi(call = request) {
-  let contract
-  let contractAt = 0
   async function capabilities() {
-    if (contract && Date.now() - contractAt < CONNECTION_TTL_MS) return contract
-    contract = inspectContract(await call("/openapi.json"))
-    contractAt = Date.now()
-    return contract
+    // The production transport and mutation checks share the same identity-scoped cache.
+    // Injected HTTP transports (fixtures) supply their own target and need no discovery.
+    if (call !== request) return inspectContract(await call("/openapi.json"))
+    try {
+      return await checkTarget(await connection())
+    } catch (error) {
+      // The contract read is safe to retry if discovery raced with service shutdown.
+      if (!isConnectionError(error)) throw error
+      return checkTarget(await connection({ force: true }), { force: true })
+    }
   }
   async function write(path, body, identity) {
     await capabilities()
@@ -107,8 +108,22 @@ export function createApi(call = request) {
       throw new Error(`${identity}: ${error.message}. Admission may have succeeded; inspect this session before submitting a new input.`, { cause: error })
     }
   }
-  async function createSession({ id = `ses_${randomUUID()}`, title, directory, model, agent, permissions, metadata }) {
-    return write("/api/session", { id, title, location: { directory }, model, agent, permissions, metadata }, `Session ${id}`)
+  async function createSession({ title, directory, model, agent, permissions, metadata }) {
+    await capabilities()
+    // Free-model acceptance returned 403 provider.auth for caller-supplied session ids.
+    // Let the service mint them. Without a stable id the POST cannot be retried, so a
+    // lost response is reported instead of risking a second session.
+    try {
+      const result = (await call("/api/session", {
+        method: "POST",
+        body: { title, location: { directory }, model, agent, permissions, metadata },
+        contract: true,
+      }))?.data
+      if (typeof result?.id !== "string" || !result.id) throw new Error("OpenCode returned no session id")
+      return result
+    } catch (error) {
+      throw new Error(`Session creation: ${error.message}. The service may have created it; list sessions before creating another.`, { cause: error })
+    }
   }
   async function prompt(sessionID, text, { id = `msg_${randomUUID()}`, delivery = "steer", metadata, resume } = {}) {
     return write(sessionPath(sessionID, "/prompt"), { id, text, delivery, metadata, resume }, `Session ${sessionID}, input ${id}`)

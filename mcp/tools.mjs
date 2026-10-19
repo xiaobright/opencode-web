@@ -90,11 +90,12 @@ export function createTools({ api, env = process.env } = {}) {
   }
 
   function fields(snap) {
-    return { state: snap.state, input_id: snap.inputID, input_status: snap.inputStatus, pending_inputs: snap.pending, last_outcome: snap.lastOutcome, input_outcome: snap.inputOutcome, history_truncated: snap.historyTruncated }
+    return { state: snap.state, input_id: snap.inputID, input_status: snap.inputStatus, pending_inputs: snap.pending, last_outcome: snap.lastOutcome, input_outcome: snap.inputOutcome, input_error: snap.inputError, history_truncated: snap.historyTruncated }
   }
 
   function inputLine(snap) {
-    return `Input ${snap.inputID ?? "unknown"} · ${snap.inputStatus} · ${snap.pending} pending`
+    const line = `Input ${snap.inputID ?? "unknown"} · ${snap.inputStatus}${snap.inputOutcome ? ` (${snap.inputOutcome})` : ""} · ${snap.pending} pending`
+    return snap.inputError ? `${line}\nError: ${snap.inputError.type}${snap.inputError.status ? ` (${snap.inputError.status})` : ""}: ${snap.inputError.message}` : line
   }
 
   function elapsedOf(messages) {
@@ -112,7 +113,8 @@ export function createTools({ api, env = process.env } = {}) {
 
   async function report(sessionID, snap, detail, extra = {}) {
     const structured = { session_id: sessionID, ...fields(snap), ...extra }
-    if (snap.inputStatus !== "settled" || !["done", "failed", "cancelled"].includes(snap.state)) {
+    // A completed input keeps its answer even while other inputs are queued/running.
+    if (snap.inputStatus !== "settled") {
       const guidance = snap.state === "running"
         ? 'Still running; call action="wait" again to keep waiting.'
         : snap.state === "queued"
