@@ -39,7 +39,7 @@ function fixtureClient(fixture, env = {}) {
 }
 
 test("stdio server exposes two tools and delegates through a discovered service", async () => {
-  const fixture = await startFixture()
+  const fixture = await startFixture({ dropResponses: { create: 1, prompt: 1 } })
   const { client, transport } = fixtureClient(fixture)
   try {
     await client.connect(transport)
@@ -52,6 +52,10 @@ test("stdio server exposes two tools and delegates through a discovered service"
     expect(delegated.isError).toBeFalsy()
     expect(delegated.structuredContent.state).toBe("done")
     expect(delegated.structuredContent.text).toBe("PONG.")
+    expect(delegated.structuredContent.input_status).toBe("settled")
+    expect(delegated.structuredContent.input_id).toStartWith("msg_")
+    expect(fixture.state.created).toBe(1)
+    expect(fixture.state.prompts).toBe(1)
     const sessionID = delegated.structuredContent.session_id
 
     const status = await client.callTool({ name: "opencode_session", arguments: { action: "status", session_id: sessionID } })
@@ -115,6 +119,32 @@ test("a timed-out message can be resumed through a new Node stdio process", asyn
     const waited = await second.client.callTool({ name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
     expect(waited.structuredContent.state).toBe("done")
     expect(waited.structuredContent.text).toBe("second answer")
+  } finally {
+    await first.client.close().catch(() => {})
+    await second.client.close().catch(() => {})
+    await fixture.close()
+  }
+}, 20_000)
+
+test("stdio cancellation preserves a queued input and a new client recovers its ID", async () => {
+  const fixture = await startFixture({ deliveryDelayMs: 120_000 })
+  const env = { OPENCODE_MCP_DELEGATE_WAIT_MS: "25" }
+  const first = fixtureClient(fixture, env)
+  const second = fixtureClient(fixture, env)
+  try {
+    await first.client.connect(first.transport)
+    const delegated = await first.client.callTool({ name: "opencode_delegate", arguments: { task: "delayed" } })
+    expect(delegated.structuredContent.input_status).toBe("queued")
+    const sessionID = delegated.structuredContent.session_id
+    const cancel = await first.client.callTool({ name: "opencode_session", arguments: { action: "cancel", session_id: sessionID } })
+    expect(cancel.structuredContent.state).toBe("queued")
+    expect(cancel.structuredContent.last_outcome).toBe("interrupted")
+    await first.client.close()
+    await second.client.connect(second.transport)
+    const result = await second.client.callTool({ name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
+    expect(result.structuredContent.input_id).toBe(delegated.structuredContent.input_id)
+    expect(result.structuredContent.pending_inputs).toBe(1)
+    expect(result.structuredContent.text).toBeUndefined()
   } finally {
     await first.client.close().catch(() => {})
     await second.client.close().catch(() => {})

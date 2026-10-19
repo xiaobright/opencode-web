@@ -23,7 +23,8 @@ export function autoSleep(env = process.env) {
 }
 
 /** Pure decision: "keep" while any signal says somebody is around, "sleep" once all are quiet. */
-export function idleVerdict({ streams = 0, idleFor = 0, sessionAge = Infinity, ms }) {
+export function idleVerdict({ streams = 0, active = 0, idleFor = 0, sessionAge = Infinity, ms }) {
+  if (active > 0) return { action: "keep", reason: "a session is executing" }
   if (streams > 0) return { action: "keep", reason: "a browser is holding an event stream" }
   if (idleFor < ms) return { action: "keep", reason: "the web UI was used recently" }
   if (sessionAge < ms) return { action: "keep", reason: "a session was used recently" }

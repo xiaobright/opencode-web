@@ -9,6 +9,8 @@ import { existsSync, statSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
 import { resolve } from "../src/service.mjs"
 import { normalizeModel } from "../src/models.mjs"
+import { randomUUID } from "node:crypto"
+import { inspectContract } from "./compatibility.mjs"
 
 export { normalizeModel }
 
@@ -62,6 +64,7 @@ export async function request(path, options = {}) {
   const method = (options.method ?? "GET").toUpperCase()
   const safe = method === "GET" || method === "HEAD" || options.retry === true
   const first = await connection()
+  if (options.contract) await checkTarget(first)
   try {
     return await fetchOnce(first, path, options)
   } catch (error) {
@@ -69,45 +72,86 @@ export async function request(path, options = {}) {
     if (!safe)
       throw new Error(`${method} ${path}: connection lost; the request may have been accepted and was not retried. Check the session before submitting again.`, { cause: error })
     // The service was restarted or auto-slept between calls; resolve once more.
-    return await fetchOnce(await connection({ force: true }), path, options)
+    const next = await connection({ force: true })
+    if (options.contract) await checkTarget(next)
+    return await fetchOnce(next, path, options)
   }
+}
+
+let checkedTarget
+async function checkTarget(target) {
+  if (checkedTarget?.url === target.url && checkedTarget.authorization === target.authorization && Date.now() - checkedTarget.at < CONNECTION_TTL_MS) return
+  inspectContract(await fetchOnce(target, "/openapi.json"))
+  checkedTarget = { ...target, at: Date.now() }
 }
 
 const sessionPath = (sessionID, suffix = "") => `/api/session/${encodeURIComponent(sessionID)}${suffix}`
 
-export async function createSession({ title, directory, model, agent, permissions, metadata }) {
-  const body = await request("/api/session", {
-    method: "POST",
-    body: {
-      title,
-      location: { directory },
-      ...(model ? { model } : {}),
-      ...(agent ? { agent } : {}),
-      ...(permissions ? { permissions } : {}),
-      ...(metadata ? { metadata } : {}),
-    },
-  })
-  return body.data
+/** Inject only HTTP transport in tests; route, payload and retry policy stay production code. */
+export function createApi(call = request) {
+  let contract
+  let contractAt = 0
+  async function capabilities() {
+    if (contract && Date.now() - contractAt < CONNECTION_TTL_MS) return contract
+    contract = inspectContract(await call("/openapi.json"))
+    contractAt = Date.now()
+    return contract
+  }
+  async function write(path, body, identity) {
+    await capabilities()
+    try {
+      const result = (await call(path, { method: "POST", body, retry: true, contract: true }))?.data
+      if (result?.id !== body.id) throw new Error("OpenCode did not preserve the supplied ID; incompatible admission response")
+      return result
+    } catch (error) {
+      throw new Error(`${identity}: ${error.message}. Admission may have succeeded; inspect this session before submitting a new input.`, { cause: error })
+    }
+  }
+  async function createSession({ id = `ses_${randomUUID()}`, title, directory, model, agent, permissions, metadata }) {
+    return write("/api/session", { id, title, location: { directory }, model, agent, permissions, metadata }, `Session ${id}`)
+  }
+  async function prompt(sessionID, text, { id = `msg_${randomUUID()}`, delivery = "steer", metadata, resume } = {}) {
+    return write(sessionPath(sessionID, "/prompt"), { id, text, delivery, metadata, resume }, `Session ${sessionID}, input ${id}`)
+  }
+  async function messagePage(sessionID, { limit = 200, cursor, type } = {}) {
+    const query = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : { order: "desc" }), ...(type ? { type } : {}) })
+    const body = await call(sessionPath(sessionID, `/message?${query}`))
+    if (!Array.isArray(body?.data)) throw new Error("Invalid OpenCode messages response")
+    return { data: body.data, cursor: body.cursor ?? {} }
+  }
+  async function inbox(sessionID) {
+    const body = await call(sessionPath(sessionID, "/inbox"))
+    if (!Array.isArray(body?.data)) throw new Error("Invalid OpenCode inbox response")
+    return body.data
+  }
+  async function activeSessions() {
+    const body = await call("/api/session/active")
+    if (!body?.data || typeof body.data !== "object" || Array.isArray(body.data)) throw new Error("Invalid OpenCode active sessions response")
+    return new Set(Object.keys(body.data))
+  }
+  async function wait(sessionID, timeoutMs) {
+    const started = Date.now()
+    try {
+      await call(`/api/experimental/session/${encodeURIComponent(sessionID)}/wait`, { method: "POST", timeoutMs, retry: true })
+      return { completed: true, waitedMs: Date.now() - started }
+    } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError" || error?.status === 503)
+        return { completed: false, waitedMs: Date.now() - started }
+      throw error
+    }
+  }
+  return {
+    capabilities, createSession, prompt, messagePage, inbox, activeSessions, wait,
+    messages: async (id, limit = 100) => (await messagePage(id, { limit })).data,
+    sessionInfo: async (id) => (await call(sessionPath(id))).data,
+    diff: async (id) => summarizeDiff((await call(sessionPath(id, "/diff"))).data),
+    interrupt: (id) => call(sessionPath(id, "/interrupt"), { method: "POST" }),
+    setInstruction: (id, key, value) => call(`/api/experimental/session/${encodeURIComponent(id)}/instructions/entries/${encodeURIComponent(key)}`, { method: "PUT", body: { value }, retry: true, contract: true }),
+    catalog: async () => (await call("/api/model")).data.map(normalizeModel),
+  }
 }
 
-export async function prompt(sessionID, text, { delivery } = {}) {
-  const body = await request(sessionPath(sessionID, "/prompt"), {
-    method: "POST",
-    body: { text, ...(delivery ? { delivery } : {}) },
-  })
-  return body.data
-}
-
-/** Newest first, like the endpoint itself. */
-export async function messages(sessionID, limit = 100) {
-  const body = await request(sessionPath(sessionID, `/message?limit=${limit}`))
-  return Array.isArray(body?.data) ? body.data : []
-}
-
-export async function sessionInfo(sessionID) {
-  const body = await request(sessionPath(sessionID))
-  return body.data
-}
+export const { capabilities, createSession, prompt, messagePage, inbox, activeSessions, wait, messages, sessionInfo, diff, interrupt, setInstruction, catalog } = createApi()
 
 /** One-line summary of a session diff, shared with the test fixture. */
 export function summarizeDiff(files) {
@@ -120,46 +164,6 @@ export function summarizeDiff(files) {
     .filter(Boolean)
     .join(", ")
   return { count: list.length, additions, deletions, names }
-}
-
-/** Files this session changed so far, as a one-line summary for progress reports. */
-export async function diff(sessionID) {
-  const body = await request(sessionPath(sessionID, "/diff"))
-  return summarizeDiff(Array.isArray(body?.data) ? body.data : [])
-}
-
-export async function activeSessions() {
-  const body = await request("/api/session/active")
-  return new Set(Object.keys(body?.data ?? {}))
-}
-
-export async function interrupt(sessionID) {
-  return request(sessionPath(sessionID, "/interrupt"), { method: "POST" })
-}
-
-/** Resolves when the session agent loop is idle; never throws on timeout. */
-export async function wait(sessionID, timeoutMs) {
-  const started = Date.now()
-  try {
-    await request(`/api/experimental/session/${encodeURIComponent(sessionID)}/wait`, {
-      method: "POST",
-      timeoutMs,
-      // This POST only observes the loop; replaying it does not submit work.
-      retry: true,
-    })
-    return { completed: true, waitedMs: Date.now() - started }
-  } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError")
-      return { completed: false, waitedMs: Date.now() - started }
-    // A loop that has not registered yet cannot be awaited; treat it as still starting.
-    if (error?.status === 503) return { completed: false, waitedMs: Date.now() - started }
-    throw error
-  }
-}
-
-export async function catalog() {
-  const body = await request("/api/model")
-  return Array.isArray(body?.data) ? body.data.map(normalizeModel) : []
 }
 
 export function normalizeDirectory(directory) {

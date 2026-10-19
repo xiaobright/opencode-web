@@ -8,11 +8,11 @@
 // a caller has no way to know which free model is good today, and does not need to.
 //
 // Delegated sessions get a working agreement: a plan line, then one progress line per
-// step. It rides in the task message because MCP cannot inject a system prompt, and it
-// is what status/wait report back. opencode V2 removed the todo tool, so it is text.
+// step, stored as an API instruction entry when available. These are display hints;
+// native Inbox, active execution and idle messages determine lifecycle state.
 
 import { normalizeDirectory } from "./opencode.mjs"
-import { deriveTitle, formatAge, readOutput, stateFromMessages } from "./tasks.mjs"
+import { deriveTitle, formatAge, readOutput, latestInput, readSnapshot } from "./tasks.mjs"
 import { AGREEMENT, formatDuration, renderProgress } from "./progress.mjs"
 import { rankingPath, readRanking, selectModel } from "../src/models.mjs"
 
@@ -89,13 +89,12 @@ export function createTools({ api, env = process.env } = {}) {
     return { providerID: chosen.providerID, id: chosen.id }
   }
 
-  /** State and messages in one read; `completed` skips the active probe. */
-  async function snapshot(sessionID, completed, limit = 40) {
-    const messages = await api.messages(sessionID, limit)
-    // A finished wait still has to read the idle marker: it carries done / failed / cancelled.
-    if (completed) return { state: stateFromMessages(messages, { active: false }), messages }
-    const active = await api.activeSessions().catch(() => new Set())
-    return { state: stateFromMessages(messages, { active: active.has(sessionID) }), messages }
+  function fields(snap) {
+    return { state: snap.state, input_id: snap.inputID, input_status: snap.inputStatus, pending_inputs: snap.pending, last_outcome: snap.lastOutcome, input_outcome: snap.inputOutcome, history_truncated: snap.historyTruncated }
+  }
+
+  function inputLine(snap) {
+    return `Input ${snap.inputID ?? "unknown"} · ${snap.inputStatus} · ${snap.pending} pending`
   }
 
   function elapsedOf(messages) {
@@ -111,17 +110,32 @@ export function createTools({ api, env = process.env } = {}) {
     return [head(sessionID, state, elapsed === undefined ? undefined : formatDuration(elapsed)), block].filter(Boolean).join("\n")
   }
 
-  async function runningReport(sessionID, messages, state) {
-    const text = await progressText(sessionID, state, messages)
-    return `${text}\n\nStill running; call action="wait" again to keep waiting.`
+  async function report(sessionID, snap, detail, extra = {}) {
+    const structured = { session_id: sessionID, ...fields(snap), ...extra }
+    if (snap.inputStatus !== "settled" || !["done", "failed", "cancelled"].includes(snap.state)) {
+      const guidance = snap.state === "running"
+        ? 'Still running; call action="wait" again to keep waiting.'
+        : snap.state === "queued"
+          ? 'Input remains in Inbox. wait observes execution; it does not resume parked input. cancel only interrupts active execution.'
+          : snap.historyTruncated
+            ? 'Input boundary is outside the 1000-message read limit. Inspect the session history; no unrelated answer is returned.'
+            : 'No confirmed idle boundary for this input. Inspect the session before resubmitting; the service may have restarted.'
+      return { text: `${await progressText(sessionID, snap.state, snap.messages)}\n${inputLine(snap)}\n\n${guidance}`, structured }
+    }
+    const output = readOutput(snap.messages, { inputID: snap.inputID, maxChars: config.maxChars, protocol: config.protocol })
+    return {
+      text: withBody(`${head(sessionID, snap.state, detail)}\n${inputLine(snap)}`, output.text, output.truncated),
+      structured: { ...structured, text: output.text, truncated: output.truncated },
+    }
   }
 
-  function finishedReport(sessionID, messages, detail, extra = {}) {
-    const state = stateFromMessages(messages)
-    const output = readOutput(messages, { maxChars: config.maxChars })
-    return {
-      text: withBody(head(sessionID, state, detail), output.text, output.truncated),
-      structured: { session_id: sessionID, state, text: output.text, truncated: output.truncated, ...extra },
+  async function observe(sessionID, inputID, ms) {
+    try {
+      const waited = await api.wait(sessionID, ms)
+      const snap = await readSnapshot(api, sessionID, inputID)
+      return { waited, snap }
+    } catch (error) {
+      throw new Error(`Session ${sessionID}, input ${inputID ?? "unknown"}: ${error.message}. Admission is not rolled back; inspect this session before resubmitting.`, { cause: error })
     }
   }
 
@@ -136,6 +150,7 @@ export function createTools({ api, env = process.env } = {}) {
         config.directory ||
         fail(tool, "pass directory or set OPENCODE_MCP_DIRECTORY: delegated sessions need an explicit working directory."),
     )
+    const capabilities = await api.capabilities()
     const model = await resolveModel()
 
     const session = await api.createSession({
@@ -145,9 +160,11 @@ export function createTools({ api, env = process.env } = {}) {
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
       metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller },
     })
-    const preamble = config.protocol ? AGREEMENT : undefined
+    let admitted
     try {
-      await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
+      if (config.protocol && capabilities.instructions) await api.setInstruction(session.id, "delegation-protocol", AGREEMENT)
+      const preamble = config.protocol && !capabilities.instructions ? AGREEMENT : undefined
+      admitted = await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
     } catch (error) {
       // The prompt may already be queued. Keep the handle available instead of inviting
       // another delegation (and another execution) after a lost response.
@@ -156,16 +173,8 @@ export function createTools({ api, env = process.env } = {}) {
 
     // A short wait makes a quick task a single round-trip; anything longer becomes a
     // session to poll, which is the normal way to talk to a subagent.
-    const waited = await api.wait(session.id, config.delegateWaitMs)
-    const { state, messages } = await snapshot(session.id, waited.completed, 100)
-    if (state === "running" || state === "pending") {
-      return {
-        text: `${await runningReport(session.id, messages, state)}\n\nTip: session_id="${session.id}"`,
-        structured: { session_id: session.id, state },
-      }
-    }
-
-    return finishedReport(session.id, messages, `${(waited.waitedMs / 1000).toFixed(1)}s`)
+    const { waited, snap } = await observe(session.id, admitted.id, config.delegateWaitMs)
+    return report(session.id, snap, `${(waited.waitedMs / 1000).toFixed(1)}s`)
   }
 
   /* ── opencode_session ────────────────────────────────────────────────── */
@@ -176,42 +185,25 @@ export function createTools({ api, env = process.env } = {}) {
     const action = oneOf(args.action, ACTIONS, tool, "action")
     const sessionID = requireString(args, "session_id", tool)
 
+    const followUp = action === "message" ? requireString(args, "text", tool) : undefined
+    await api.capabilities()
+    // Freeze the input before waiting: a later concurrent sender must not change which
+    // answer this invocation reads. A fresh invocation recovers the latest durable input.
+    let inputID = action === "message" ? undefined : await latestInput(api, sessionID)
     if (action === "status") {
-      const { state, messages } = await snapshot(sessionID, false, 40)
-      const updated = messages[0]?.time?.created ?? 0
-      const text = await progressText(sessionID, state, messages)
+      const snap = await readSnapshot(api, sessionID, inputID)
+      const updated = snap.messages[0]?.time?.created ?? 0
       return {
-        text: [text, updated ? `Last update ${formatAge(updated)} ago` : ""].filter(Boolean).join("\n"),
-        structured: { session_id: sessionID, state },
+        text: [await progressText(sessionID, snap.state, snap.messages), inputLine(snap), updated ? `Last update ${formatAge(updated)} ago` : ""].filter(Boolean).join("\n"),
+        structured: { session_id: sessionID, ...fields(snap) },
       }
     }
-
-    if (action === "wait" || action === "message") {
-      if (action === "message") {
-        const text = requireString(args, "text", tool)
-        await api.prompt(sessionID, text)
-      }
-
-      const waited = await api.wait(sessionID, config.waitMs)
-      const { state, messages } = await snapshot(sessionID, waited.completed, 100)
-      if (state === "running" || state === "pending") {
-        return {
-          text: await runningReport(sessionID, messages, state),
-          structured: { session_id: sessionID, state, waited_ms: waited.waitedMs },
-        }
-      }
-
-      return finishedReport(sessionID, messages, `waited ${(waited.waitedMs / 1000).toFixed(1)}s`, { waited_ms: waited.waitedMs })
-    }
-
-    // cancel
-    await api.interrupt(sessionID)
-    const waited = await api.wait(sessionID, 15_000)
-    const { state } = await snapshot(sessionID, waited.completed, 20)
-    return {
-      text: head(sessionID, state),
-      structured: { session_id: sessionID, state },
-    }
+    if (action === "message") inputID = (await api.prompt(sessionID, followUp)).id
+    if (action === "cancel") await api.interrupt(sessionID)
+    const { waited, snap } = await observe(sessionID, inputID, action === "cancel" ? 15_000 : config.waitMs)
+    const result = await report(sessionID, snap, `waited ${(waited.waitedMs / 1000).toFixed(1)}s`, { waited_ms: waited.waitedMs })
+    if (action === "cancel") result.text += `\n\nInterruption requested for active execution; ${snap.pending} pending input(s) retained.`
+    return result
   }
 
   return {
@@ -233,7 +225,7 @@ export function createTools({ api, env = process.env } = {}) {
     },
     opencode_session: {
       title: "Talk to a delegated session",
-      description: "Check a delegated session, wait for it, send a follow-up, or cancel it.",
+      description: "Check a session or wait for execution, steer with a follow-up, or interrupt active execution (pending Inbox inputs are retained).",
       inputSchema: {
         type: "object",
         properties: {

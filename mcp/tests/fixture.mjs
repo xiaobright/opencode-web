@@ -2,6 +2,7 @@
 // sessions, prompts, a blocking wait, newest-first messages, idle markers and models.
 
 import { randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { createServer } from "node:http"
 
 export const AUTH = `Basic ${Buffer.from("opencode:fixture").toString("base64")}`
@@ -42,221 +43,179 @@ export const DEFAULT_MODELS = [
   },
 ]
 
-export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded"], replyDelayMs = 5, models = DEFAULT_MODELS, progressMode = false, diffFiles = [], dropResponses = {} } = {}) {
-  const sessions = new Map()
-  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, messageReads: 0, promptTexts: [], deliveries: [] }
-  const waiters = new Map()
-  const timers = new Map()
-  const drops = { ...dropResponses }
+export const BASELINE_DOCUMENT = JSON.parse(readFileSync(new URL('./openapi-baseline.json', import.meta.url), 'utf8'))
 
+export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded"], replyDelayMs = 5, deliveryDelayMs = 0, models = DEFAULT_MODELS, progressMode = false, diffFiles = [], dropResponses = {}, instructions = true, document = BASELINE_DOCUMENT } = {}) {
+  const sessions = new Map()
+  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, messageReads: 0, promptTexts: [], deliveries: [], instructionWrites: 0 }
+  const waiters = new Map()
+  const timers = new Set()
+  const drops = { ...dropResponses }
+  const contract = structuredClone(document)
+  if (!instructions) delete contract.paths["/api/experimental/session/{sessionID}/instructions/entries/{key}"]
+  function later(fn, ms) {
+    const timer = setTimeout(() => { timers.delete(timer); fn() }, ms)
+    timers.add(timer)
+    return timer
+  }
   function drop(kind, request) {
     if (!(drops[kind] > 0)) return false
     drops[kind]--
     request.socket.destroy()
     return true
   }
-
+  function release(session) {
+    for (const done of waiters.get(session.id) ?? []) done()
+    waiters.delete(session.id)
+  }
+  function promote(session, item) {
+    if (!session.inbox.has(item.id)) return
+    session.inbox.delete(item.id)
+    session.messages.push({ id: item.id, type: "user", time: { created: Date.now() }, ...item.payload })
+    if (progressMode && session.turns === 1) {
+      session.messages.push({ id: `msg_${randomUUID()}`, type: "assistant", time: { created: Date.now() }, content: [
+        { type: "text", text: "plan: 1) 读代码 2) 改代码 3) 跑测试\nprogress: 1/3 读完入口 -> 修改实现" },
+        { type: "tool", name: "shell", state: { status: "running", input: { command: "npm test" } } },
+      ] })
+    }
+  }
+  function wake(session) {
+    if (session.running) return
+    session.running = true
+    session.timer = later(() => {
+      if (!session.running) return
+      const items = [...session.inbox.values()]
+      const steers = items.filter((item) => item.delivery === "steer")
+      for (const item of steers.length ? steers : items.slice(0, 1)) promote(session, item)
+      session.timer = later(() => settle(session, outcomes[Math.min(session.turns - 1, outcomes.length - 1)]), replyDelayMs)
+    }, deliveryDelayMs)
+  }
   function settle(session, outcome) {
-    if (!session.running) return
-    clearTimeout(timers.get(session.id))
-    timers.delete(session.id)
+    if (!session?.running) return
+    clearTimeout(session.timer)
+    timers.delete(session.timer)
     session.running = false
     const now = Date.now()
-    if (outcome === "succeeded") {
-      const reply = replies[Math.min(session.turns - 1, replies.length - 1)]
-      session.messages.push({
-        id: `msg_${randomUUID()}`,
-        type: "assistant",
-        time: { created: now, completed: now + 1 },
-        content: [{ type: "text", text: reply }],
-        finish: "stop",
-        tokens: { input: 10, output: 2 },
-        cost: 0,
-      })
-    }
-    session.messages.push({
-      id: `msg_${randomUUID()}`,
-      type: "idle",
-      outcome,
-      time: { created: now + 1 },
-    })
-    const pending = waiters.get(session.id) ?? []
-    waiters.delete(session.id)
-    for (const resolve of pending) resolve()
-    void state
+    if (outcome === "succeeded") session.messages.push({ id: `msg_${randomUUID()}`, type: "assistant", time: { created: now, completed: now }, content: [{ type: "text", text: replies[Math.min(session.turns - 1, replies.length - 1)] }], finish: "stop" })
+    session.messages.push({ id: `msg_${randomUUID()}`, type: "idle", outcome, time: { created: now } })
+    if (outcome === "succeeded" && session.inbox.size) wake(session)
+    else release(session)
   }
-
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://fixture")
     const json = (status, body) => {
       response.writeHead(status, { "content-type": "application/json" })
       response.end(body === undefined ? "" : JSON.stringify(body))
     }
-
     if (request.headers.authorization !== AUTH) return json(401, { error: "unauthorized" })
-
-    const sessionID = /\/api\/(?:experimental\/)?session\/([^/]+)/.exec(url.pathname)?.[1]
-    const session = sessionID ? sessions.get(decodeURIComponent(sessionID)) : undefined
-
-    if (request.method === "GET" && url.pathname === "/api/info") return json(200, { version: "fixture", pid: process.pid })
-    if (request.method === "GET" && url.pathname === "/api/model") return json(200, { data: models })
-    if (request.method === "GET" && url.pathname === "/api/session/active")
-      return json(200, { data: Object.fromEntries([...sessions.values()].filter((item) => item.running).map((item) => [item.id, { type: "running" }])) })
-
+    const read = async () => {
+      const chunks = []
+      for await (const chunk of request) chunks.push(chunk)
+      return JSON.parse(Buffer.concat(chunks).toString() || "{}")
+    }
+    if (url.pathname === "/openapi.json") return json(200, contract)
+    if (url.pathname === "/api/info") return json(200, { version: "fixture", pid: process.pid })
+    if (url.pathname === "/api/model") return json(200, { data: models })
+    if (url.pathname === "/api/session/active") return json(200, { data: Object.fromEntries([...sessions.values()].filter((item) => item.running).map((item) => [item.id, { type: "running" }])) })
     if (request.method === "POST" && url.pathname === "/api/session") {
-      let body = ""
-      request.on("data", (chunk) => (body += chunk))
-      request.on("end", () => {
-        const input = JSON.parse(body || "{}")
-        const created = {
-          id: `ses_${randomUUID()}`,
-          title: input.title ?? "",
-          model: input.model,
-          location: input.location,
-          running: false,
-          turns: 0,
-          messages: [],
-          permissions: input.permissions,
-          metadata: input.metadata,
-        }
-        sessions.set(created.id, created)
+      const input = await read()
+      const id = input.id ?? `ses_${randomUUID()}`
+      if (!sessions.has(id)) {
+        sessions.set(id, { ...input, id, running: false, turns: 0, messages: [], inbox: new Map(), admitted: new Map(), instructions: {} })
         state.created++
-        if (drop("create", request)) return
-        json(200, { data: created })
-      })
-      return
+      }
+      if (drop("create", request)) return
+      return json(200, { data: sessions.get(id) })
     }
-
+    const sessionID = /\/api\/(?:experimental\/)?session\/([^/]+)/.exec(url.pathname)?.[1]
+    const session = sessions.get(decodeURIComponent(sessionID ?? ""))
     if (!session) return json(404, { error: "session not found" })
-
     if (request.method === "POST" && url.pathname.endsWith("/prompt")) {
-      let body = ""
-      request.on("data", (chunk) => (body += chunk))
-      request.on("end", () => {
-        const input = JSON.parse(body || "{}")
+      const input = await read()
+      const id = input.id ?? `msg_${randomUUID()}`
+      if ([...sessions.values()].some((other) => other.id !== session.id && other.admitted.has(id))) return json(409, { error: "cross-session ID reuse" })
+      let item = session.admitted.get(id)
+      if (!item) {
+        item = { id, sessionID: session.id, type: "user", time: { created: Date.now() }, delivery: input.delivery ?? "steer", payload: { text: input.text, ...(input.metadata ? { metadata: input.metadata } : {}) } }
+        session.admitted.set(id, item)
+        session.inbox.set(id, item)
         session.turns++
-        state.promptTexts.push(input.text)
-        state.deliveries.push(input.delivery ?? null)
-        session.messages.push({ id: `msg_${randomUUID()}`, type: "user", time: { created: Date.now() }, text: input.text })
-        session.running = true
         state.prompts++
-        if (progressMode && session.turns === 1) {
-          // A running step: plan, progress line and an in-flight tool, before the reply lands.
-          const started = Date.now()
-          session.messages.push({
-            id: `msg_${randomUUID()}`,
-            type: "assistant",
-            time: { created: started },
-            content: [
-              { type: "text", text: "plan: 1) 读代码 2) 改代码 3) 跑测试\nprogress: 1/3 读完入口 -> 修改实现" },
-              { type: "tool", name: "shell", state: { status: "running", input: { command: "npm test" } }, time: { created: started } },
-            ],
-          })
-        }
-        const outcome = outcomes[Math.min(session.turns - 1, outcomes.length - 1)]
-        timers.set(session.id, setTimeout(() => settle(session, outcome), replyDelayMs))
-        if (drop("prompt", request)) return
-        json(200, { data: { id: "inbox" } })
-      })
-      return
+        state.promptTexts.push(input.text)
+        state.deliveries.push(item.delivery)
+      }
+      // Core reconciles delivered input from projected history. Its returned time is
+      // delivery time; the payload is still the original one. Empty wakes are omitted
+      // in this provider-free fixture, but no delivered input is ever reinserted.
+      const delivered = session.messages.find((message) => message.id === id && message.type === "user")
+      if (delivered) item = { ...item, time: delivered.time, delivery: input.delivery ?? "steer" }
+      if (input.resume !== false && session.inbox.has(id)) {
+        if (session.running && item.delivery === "steer") later(() => { if (session.running) promote(session, item) }, deliveryDelayMs)
+        else wake(session)
+      }
+      if (drop("prompt", request)) return
+      return json(200, { data: item })
     }
-
-    if (request.method === "POST" && url.pathname === `/api/experimental/session/${session.id}/wait`) {
+    if (request.method === "POST" && url.pathname.endsWith("/wait")) {
       state.waits++
       if (drop("wait", request)) return
       if (!session.running) return json(204)
       const pending = waiters.get(session.id) ?? []
-      pending.push(() => {
-        response.writeHead(204)
-        response.end()
-      })
+      const done = () => json(204)
+      pending.push(done)
       waiters.set(session.id, pending)
+      response.on("close", () => { const at = pending.indexOf(done); if (at >= 0) pending.splice(at, 1) })
       return
     }
-
     if (request.method === "POST" && url.pathname.endsWith("/interrupt")) {
       state.interrupts++
       settle(session, "interrupted")
-      return json(200, { data: { ok: true } })
+      if (drop("interrupt", request)) return
+      return json(204)
     }
-
-    if (request.method === "GET" && url.pathname.endsWith("/diff")) return json(200, { data: diffFiles })
-
-    if (request.method === "GET" && url.pathname.endsWith("/message")) {
+    if (request.method === "PUT" && url.pathname.includes("/instructions/entries/")) {
+      if (!instructions) return json(404)
+      session.instructions[url.pathname.split("/").at(-1)] = (await read()).value
+      state.instructionWrites++
+      return json(204)
+    }
+    if (url.pathname.endsWith("/inbox")) return json(200, { data: [...session.inbox.values()] })
+    if (url.pathname.endsWith("/diff")) return json(200, { data: diffFiles })
+    if (url.pathname.endsWith("/message")) {
       state.messageReads++
       if (drop("messages", request)) return
+      if (url.searchParams.has("cursor") && url.searchParams.has("order")) return json(400, { error: "cursor and order are exclusive" })
       const limit = Number(url.searchParams.get("limit") ?? 20)
-      return json(200, { data: [...session.messages].reverse().slice(0, limit), cursor: {} })
+      const type = url.searchParams.get("type")
+      const all = [...session.messages].reverse().filter((item) => !type || item.type === type)
+      const offset = Number(url.searchParams.get("cursor") ?? 0)
+      return json(200, { data: all.slice(offset, offset + limit), cursor: offset + limit < all.length ? { next: String(offset + limit) } : {} })
     }
-
-    if (request.method === "GET" && url.pathname === `/api/session/${session.id}`)
-      return json(200, { data: { id: session.id, title: session.title, location: session.location, metadata: session.metadata, time: { updated: Date.now() }, tokens: { input: 0, output: 0 }, cost: 0 } })
-
+    if (request.method === "GET" && url.pathname === `/api/session/${session.id}`) return json(200, { data: { id: session.id, title: session.title, location: session.location, metadata: session.metadata, time: { updated: session.messages.at(-1)?.time?.created ?? 0 } } })
     return json(404, { error: "not found" })
   })
-
   await new Promise((done) => server.listen(0, "127.0.0.1", done))
-  const url = `http://127.0.0.1:${server.address().port}`
   return {
-    url,
-    state,
-    sessions,
-    finish: (sessionID, outcome = "succeeded") => settle(sessions.get(sessionID), outcome),
+    url: `http://127.0.0.1:${server.address().port}`, state, sessions,
+    finish: (id, outcome = "succeeded") => settle(sessions.get(id), outcome),
+    deliver: (id) => { const session = sessions.get(id); for (const item of session.inbox.values()) promote(session, item) },
     close: () => new Promise((done) => {
-      for (const timer of timers.values()) clearTimeout(timer)
-      timers.clear()
+      for (const timer of timers) clearTimeout(timer)
       server.closeAllConnections()
       server.close(done)
     }),
   }
 }
 
-/** An api object with the fixture's address baked in, matching opencode.mjs's exports. */
 export function fixtureApi(module, url) {
-  const call = async (path, options = {}) => {
+  return module.createApi(async (path, options = {}) => {
     const response = await fetch(url + path, {
       method: options.method ?? "GET",
-      headers: {
-        authorization: AUTH,
-        accept: "application/json",
-        ...(options.body === undefined ? {} : { "content-type": "application/json" }),
-      },
+      headers: { authorization: AUTH, "content-type": "application/json" },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: AbortSignal.timeout(options.timeoutMs ?? 5_000),
     })
-    if (!response.ok) {
-      const text = await response.text().catch(() => "")
-      const error = new Error(`${options.method ?? "GET"} ${path} returned ${response.status}${text ? `: ${text}` : ""}`)
-      error.status = response.status
-      throw error
-    }
-    if (response.status === 204) return undefined
-    return response.json()
-  }
-  return {
-    ...module,
-    request: call,
-    // Mirror the real client: the tool layer passes a directory, the client turns it into
-    // the location the session API expects.
-    createSession: async (input) =>
-      (await call("/api/session", { method: "POST", body: { ...input, location: input.location ?? { directory: input.directory } } })).data,
-    prompt: async (sessionID, text, options = {}) =>
-      (await call(`/api/session/${sessionID}/prompt`, { method: "POST", body: { text, ...(options.delivery ? { delivery: options.delivery } : {}) } })).data,
-    messages: async (sessionID, limit = 100) => (await call(`/api/session/${sessionID}/message?limit=${limit}`)).data,
-    sessionInfo: async (sessionID) => (await call(`/api/session/${sessionID}`)).data,
-    activeSessions: async () => new Set(Object.keys((await call("/api/session/active")).data)),
-    interrupt: async (sessionID) => call(`/api/session/${sessionID}/interrupt`, { method: "POST" }),
-    wait: async (sessionID, timeoutMs) => {
-      const started = Date.now()
-      try {
-        await call(`/api/experimental/session/${sessionID}/wait`, { method: "POST", timeoutMs })
-        return { completed: true, waitedMs: Date.now() - started }
-      } catch (error) {
-        if (error?.name === "TimeoutError" || error?.name === "AbortError") return { completed: false, waitedMs: Date.now() - started }
-        throw error
-      }
-    },
-    catalog: async () => (await call("/api/model")).data.map(module.normalizeModel),
-    diff: async (sessionID) => module.summarizeDiff((await call(`/api/session/${sessionID}/diff`)).data),
-  }
+    if (!response.ok) { const error = new Error(`HTTP ${response.status}`); error.status = response.status; throw error }
+    return response.status === 204 ? undefined : response.json()
+  })
 }

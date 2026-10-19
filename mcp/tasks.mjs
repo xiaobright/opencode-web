@@ -47,14 +47,15 @@ export function lastTurn(messagesNewestFirst) {
 const OUTCOMES = { succeeded: "done", failed: "failed", interrupted: "cancelled" }
 
 /** State of the last run, from the newest idle marker unless the loop is running now. */
-export function stateFromMessages(messagesNewestFirst, { active = false } = {}) {
+export function stateFromMessages(messagesNewestFirst, { active = false, pending = 0 } = {}) {
   if (active) return "running"
+  if (pending) return "queued"
   for (const message of messagesNewestFirst ?? []) {
     if (message.type === "idle") return OUTCOMES[message.outcome] ?? "idle"
-    // A new prompt supersedes the previous turn's idle marker, even before it starts.
-    if (message.type === "user") return "running"
+    // Delivery alone proves neither current ownership nor completion after a restart.
+    if (message.type === "user") return "unknown"
   }
-  return (messagesNewestFirst ?? []).length > 0 ? "running" : "pending"
+  return (messagesNewestFirst ?? []).length > 0 ? "unknown" : "pending"
 }
 
 /**
@@ -62,11 +63,16 @@ export function stateFromMessages(messagesNewestFirst, { active = false } = {}) 
  * opencode, so a later wait or a restarted MCP process reads the same turn. An explicit
  * cursor may narrow the span further. `truncated` says the text did not fit.
  */
-export function readOutput(messagesNewestFirst, { cursor, maxChars = 8_000 } = {}) {
+export function readOutput(messagesNewestFirst, { cursor, inputID, maxChars = 8_000, protocol = true } = {}) {
   const chronological = [...(messagesNewestFirst ?? [])].reverse()
   let start = 0
   for (let index = 0; index < chronological.length; index++) {
     if (chronological[index].type === "user") start = index + 1
+  }
+  if (inputID) {
+    const at = chronological.findIndex((message) => message.id === inputID && message.type === "user")
+    if (at < 0) return { text: "", truncated: true, assistantMessages: 0 }
+    start = at + 1
   }
   if (cursor) {
     const at = chronological.findIndex((message) => message.id === cursor)
@@ -76,8 +82,9 @@ export function readOutput(messagesNewestFirst, { cursor, maxChars = 8_000 } = {
   const span = chronological.slice(start)
   const pieces = []
   for (const message of span) {
+    if (message.type === "idle") break
     if (message.type !== "assistant") continue
-    const text = stripProtocol(messageText(message))
+    const text = protocol ? stripProtocol(messageText(message)) : messageText(message)
     if (text) pieces.push(text)
   }
 
@@ -87,6 +94,52 @@ export function readOutput(messagesNewestFirst, { cursor, maxChars = 8_000 } = {
     text: truncated ? joined.slice(joined.length - maxChars) : joined,
     truncated,
     assistantMessages: pieces.length,
+  }
+}
+
+/** Prefer the newest pending user input, otherwise the newest delivered input. */
+export async function latestInput(api, sessionID) {
+  const pending = await api.inbox(sessionID)
+  const queued = pending.filter((item) => item.type === "user").at(-1)
+  if (queued) return queued.id
+  const users = await api.messagePage(sessionID, { type: "user", limit: 1 })
+  // User.time.created is delivery time, Inbox.time.created is admission time; they
+  // cannot be sorted together to reconstruct a global admission sequence.
+  return users.data[0]?.id
+}
+
+/** Inbox, persisted delivery/idle boundaries and live process ownership are separate facts. */
+export async function readSnapshot(api, sessionID, inputID) {
+  const pending = await api.inbox(sessionID)
+  const queued = pending.some((item) => item.id === inputID)
+  const messages = []
+  let cursor
+  let historyTruncated = false
+  const seen = new Set()
+  for (let page = 0; page < 5; page++) {
+    const result = await api.messagePage(sessionID, { cursor })
+    messages.push(...result.data.filter((item) => !seen.has(item.id)))
+    for (const item of result.data) seen.add(item.id)
+    if (queued || !inputID || messages.some((item) => item.id === inputID)) break
+    if (!result.cursor.next || result.cursor.next === cursor) break
+    cursor = result.cursor.next
+    if (page === 4) historyTruncated = true
+  }
+  // Probe after history: a wait can return before a new execution starts.
+  const active = (await api.activeSessions()).has(sessionID)
+  const at = inputID ? messages.findIndex((item) => item.id === inputID && item.type === "user") : -1
+  const boundary = at < 0 ? undefined : messages.slice(0, at).reverse().find((item) => item.type === "idle")
+  const lastIdle = messages.find((item) => item.type === "idle")
+  const inputStatus = queued ? "queued" : at >= 0 ? (boundary ? "settled" : "delivered") : "unknown"
+  // A process shutdown need not write an idle marker. Never infer success from absence
+  // in /active, nor reuse an older input's outcome for a parked/new input.
+  let state = stateFromMessages(messages, { active, pending: pending.length })
+  if (boundary && !active && !pending.length) state = OUTCOMES[boundary.outcome] ?? "idle"
+  if (inputID && inputStatus === "unknown" && !active && !pending.length) state = "unknown"
+  return {
+    state, messages, inputID, inputStatus, pending: pending.length, historyTruncated,
+    lastOutcome: lastIdle?.outcome,
+    inputOutcome: boundary?.outcome,
   }
 }
 

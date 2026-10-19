@@ -25,16 +25,33 @@
 - 会话级预授权（工具全放行），无人值守不会卡在审批上。
 - `opencode_delegate` 先等 20 秒：够快的一次调用就拿到答案；更久的会返回 `session_id`，后续用 `wait` 续等。
 - `wait` 默认每次等 30 秒，为 MCP 客户端常见的 60 秒请求超时留出状态查询和传输余量；等待预算用完时会话继续跑，再调一次即可。调大服务端等待预算前，也需相应调大客户端请求超时。
-- `message` 往同一个会话追加指令并等回复（默认 30 秒），只返回这一问的增量；超时后通过 `wait` 续等或 MCP 重连，也从持久消息恢复这一轮的输出边界。
-- `cancel` 只中断当前回合，会话和文件都保留。
+- `message` 以官方默认的 `steer` 语义追加指令：先持久接收，再在安全步骤边界投递，默认等待 30 秒。本次调用固定输入 ID，返回其投递之后、下一条 idle 之前的输出；并发 steer 可以共享一轮执行与答案，不保证一问对应一个独立回合。
+- 新的 `status` / `wait` 或 MCP 重连，优先选择 Inbox 中最后一个待处理用户输入；没有时选择最新投递的用户消息。不会混排接收时间和投递时间，也不按 ID 字典顺序推断时间。
+- `cancel` 只请求中断当前执行；会话、文件和 **Inbox 中尚未投递的输入都保留**，返回中会说明数量。`wait` 只观察，不唤醒停放的输入；需要继续时可在官方会话中恢复，或用 `message` 发送新的继续指令（也会唤醒同一 Inbox）。
 - 已结束的回合按后台结果返回 `done` / `failed` / `cancelled`，等待结束不等于执行成功。
-- 连接丢失时，只有查询和只读等待自动重试；创建会话、发送指令、取消都不自动重发。写请求报错时可能已被后台接受，应先检查会话，避免重复提交。
+- 创建会话和提交输入先生成官方兼容的稳定 ID；连接丢失时重新发现服务，复用同一请求体和 ID 重试一次。查询、只读等待、同键同值的指令写入也可重试；中断请求不重试，以免中断后续执行。超时或再次失败会带上已知 Session/input ID，应先检查会话。
+- 同一请求的重试不会重复入队，但不保证工具副作用 exactly-once，也不合并两次独立的 MCP `tools/call`。
+
+## 输入与执行状态
+
+结构化结果保留原有字段，并增加：
+
+| 字段 | 含义 |
+| --- | --- |
+| `input_id` | 本次观察的官方输入 / 用户消息 ID |
+| `input_status` | `queued` 尚在 Inbox；`delivered` 已投递、未确认结束；`settled` 已找到下一条 idle；`unknown` 未找到投递边界 |
+| `pending_inputs` | Inbox 内所有待处理输入数量（也包含官方控制输入） |
+| `last_outcome` | 最近一轮执行的官方结果，仅作历史说明 |
+| `input_outcome` | 所选输入投递后的第一条 idle 结果；多个 steer 可共享 |
+| `history_truncated` | 为定位输入最多读取 5 页、每页 200 条；超出窗口时为 true |
+
+`state` 优先报告会话 `running`，其次为 `queued`；空闲且确认所选输入结束时，按它自己的结果返回 `done` / `failed` / `cancelled`，后来别的输入失败不会改写原输入的结果。进程不活跃却缺失结束边界时返回 `unknown`，没有输入时为 `pending`。官方 wait 返回只代表当前执行空闲，不能当作输入已处理或执行成功。历史窗口找不到输入时不返回别的回合的答案；正文长度仍受 `OPENCODE_MCP_MAX_CHARS` 限制。
 
 ## 工作协议（让 status 有东西可抓）
 
 opencode V2 移除了 `todowrite`（v1 迁移里的 `REMOVED_TOOLS`），所以协议不走工具，走纯文本：
 
-- MCP 注入不了子代理的系统提示词，所以要求跟着**任务消息**一起发过去：任务前面附一段 `[Delegation protocol]`，**调用任何工具之前**先输出一行 `plan: 1) … 2) …`；
+- 优先通过官方 `PUT /api/experimental/session/{sessionID}/instructions/entries/delegation-protocol` 保存持久指令，继续影响后续回合。兼容性检查确认没有这个可选入口时，才回退到首条任务消息的 `[Delegation protocol]` 前缀；写入失败不会静默降级。要求**调用任何工具之前**先输出一行 `plan: 1) … 2) …`；
 - 每完成一步、开始下一步之前，输出一行 `progress: n/N <做了什么> -> <下一步>`；
 - 当前版本如果有 todo 工具就同步过去；没有就不要去找（避免模型把回合浪费在搜索不存在的工具上）。
 
@@ -48,7 +65,7 @@ Progress: 2/3 改完了 -> 跑测试
 Files: 2 changed +31 −4 (a.js, b.js)
 ```
 
-- `plan:` / `progress:` 行只进 status，最终答复里会被剥掉；
+- `plan:` / `progress:` 是展示提示；运行状态以官方 active、Inbox、idle 为准，不从文本猜测完成。启用协议时，最终答复剥去代码围栏之外的协议行；关闭协议时保留原文；
 - 解析时也会看 `reasoning`（只取匹配到的 plan/progress 行），推理模型把计划写在思考里也能抓到；
 - 关掉协议：`OPENCODE_MCP_PROTOCOL=off`。
 
@@ -65,10 +82,18 @@ Files: 2 changed +31 −4 (a.js, b.js)
 委派产生的会话带 `metadata: { origin: "opencode-delegate", caller }`：
 
 - **侧栏**：图标栏分「前台任务 / 后台任务」两个栏位；后台栏位只列委派会话（标注 `caller · model`，运行中显示像素格动画），工作区里的会话不受影响；
-- **监视页**：后台栏位的右侧视图，按会话显示运行状态、调用方、模型、目录、最近一轮工具流程、token/成本，2.5 秒刷新，点卡片进会话；
+- **监视页**：每 2.5 秒刷新，合并历史首页与全部活跃会话，运行中优先，可“加载更多历史”。显示 Inbox 待处理数量，结束时刷新详情，未变化的已完成详情缓存复用（最多 200 项）；已加载的旧会话元数据每分钟更新。读取失败保留上一帧并标记状态待确认；
 - **托盘**：右键菜单显示「后台任务：N 个在跑」，点击直接进后台栏位。
 
 判定完全来自会话 metadata，TUI 自己开的会话不会被误认。
+
+## 休眠与上游兼容性
+
+网关休眠前额外读取 `/api/session/active`：任何正在执行的会话（包括前台和后台）都会阻止此次休眠；探测失败或格式不兼容也保持运行。只有停放的 Inbox 不永久阻止休眠，仍遵循默认 15 分钟无访问/无更新窗口；输入由官方持久保存，`wait` 本身不会恢复执行。
+
+本地源码基线为 **OpenCode `654b79b27e79da735d6b07d766c8d7431a71d1b7`（2026-10-15）**，不是安装版本探测结果。首次使用及短缓存过期后读取 `/openapi.json`，检查 Session、active、Inbox、消息分页、等待、中断、模型和稳定 ID 入参；必要能力缺失时在提交任务前明确报错。指令入口可选。连接改变后的幂等写入会重新验证目标能力。OpenAPI 的版本字符串只作信息，不代替能力判断，也不能证明所有运行语义。
+
+`tests/openapi-baseline.json` 提取自该提交的 `packages/protocol/openapi.json`，保留操作输入及递归引用的 schema。语义对照 `specs/v2/session.md`、`packages/core/test/session-prompt.test.ts`、`session-wait.test.ts` 和 `session-instructions.test.ts`。上游升级时先比较这些契约并运行下列隔离测试，再用新版本的测试服务验收；未知能力不会静默降级。
 
 ## 环境变量（运维侧）
 
@@ -91,8 +116,10 @@ cd mcp && npm install && bun test ./tests
 ```
 
 - `tests/tools.test.mjs` / `tests/tasks.test.mjs`：假 opencode 服务覆盖派活、续等、失败/取消结果、续聊超时后的输出边界、模型排序/钉死/回落、绝对目录校验、参数隔离、输出截断。
-- `tests/client.test.mjs`：真实 Node HTTP 客户端验证丢失响应后的重试策略，确保已接收的写请求不被重复提交。
-- `tests/server.test.mjs`：官方 SDK 客户端通过 Node stdio 启动真实 server，验证两个工具、默认 30 秒续等及 MCP 进程重连（`XDG_STATE_HOME` 指向夹具，不碰真实服务）；整组测试约需 35 秒。
+- `tests/client.test.mjs`：真实 Node HTTP 客户端验证稳定 ID 重试只入队一次，以及中断请求不重试。
+- `tests/compatibility.test.mjs`：直接使用官方生成 OpenAPI 的契约快照，检查能力识别、缺失能力时不创建会话。夹具只注入 HTTP 传输，使用生产 API 包装器；区分接收/投递/结束，覆盖并发重试、保留队列、长历史分页和未知状态。
+- `tests/server.test.mjs`：官方 SDK 客户端通过 Node stdio 启动真实 server，验证两个工具、丢失响应后的稳定 ID、默认 30 秒续等、取消保留队列及 MCP 进程重连（`XDG_STATE_HOME` 指向夹具，不碰真实服务）；整组测试约需 40 秒。
+- 网关休眠：仓库根目录运行 `bun test ./tests/startup/idle.test.mjs`；后台监控与排序：在 `tests/activity` 运行 `bun run run.mjs background.spec.ts ranking.spec.ts`。均使用隔离夹具，不调用真实模型。
 
 ## 边界
 

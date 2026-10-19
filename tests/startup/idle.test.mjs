@@ -27,6 +27,7 @@ test("autoSleep defaults to 15 minutes and honours the escape hatches", () => {
 test("verdict keeps the service while any signal is alive and sleeps once all are quiet", () => {
   const ms = 60_000
   expect(idleVerdict({ streams: 1, idleFor: 10 * ms, sessionAge: 10 * ms, ms }).action).toBe("keep")
+  expect(idleVerdict({ active: 1, streams: 0, idleFor: 10 * ms, sessionAge: 10 * ms, ms }).reason).toBe("a session is executing")
   expect(idleVerdict({ streams: 0, idleFor: 10, sessionAge: 10 * ms, ms }).reason).toBe("the web UI was used recently")
   expect(idleVerdict({ streams: 0, idleFor: 10 * ms, sessionAge: 10, ms }).reason).toBe("a session was used recently")
   expect(idleVerdict({ streams: 0, idleFor: 10 * ms, sessionAge: 10 * ms, ms })).toEqual({
@@ -38,9 +39,14 @@ test("verdict keeps the service while any signal is alive and sleeps once all ar
 // The service fixture answers /api/session the way the real one does; `updated` drives the
 // shared-with-TUI guard, and `stop` is the CLI call the sweep makes when it decides to sleep.
 // "now" answers with the current time on every request, the way an actively used TUI does.
-function serviceFixture({ updated } = {}) {
-  const state = { started: false, stopped: 0, sessionRequests: 0 }
+function serviceFixture({ updated, active = {}, activeStatus = 200 } = {}) {
+  const state = { started: false, stopped: 0, sessionRequests: 0, active, activeStatus }
   const upstream = createServer((request, response) => {
+    if (request.url === "/api/session/active") {
+      response.writeHead(state.activeStatus, { "content-type": "application/json" })
+      response.end(JSON.stringify({ data: state.active }))
+      return
+    }
     if (request.url.startsWith("/api/session")) {
       state.sessionRequests++
       response.writeHead(200, { "content-type": "application/json" })
@@ -51,6 +57,7 @@ function serviceFixture({ updated } = {}) {
     response.writeHead(404, { "content-type": "text/plain" })
     response.end("fixture")
   })
+
   const backend = createBackend({
     service: {
       discover: async () => (state.started ? info : undefined),
@@ -128,3 +135,21 @@ test("disabled auto-sleep never stops the service and reports nothing in the met
     expect(meta.backend).toBe("ready")
   } finally { await close(server); await close(fixture.upstream) }
 }, 5000)
+
+for (const options of [{ active: { ses_silent: {} } }, { activeStatus: 503 }, { active: [] }]) {
+  test(`active execution or uncertain active probe prevents sleep: ${JSON.stringify(options)}`, async () => {
+    const fixture = serviceFixture({ updated: 0, ...options })
+    fixture.info.url = await listen(fixture.upstream)
+    const server = createUiServer({ overlayDir, backend: fixture.backend, idleMs: 60, sweepMs: 20 })
+    await listen(server)
+    try {
+      await fixture.backend.start()
+      await Bun.sleep(180)
+      expect(fixture.state.stopped).toBe(0)
+      fixture.state.active = {}
+      fixture.state.activeStatus = 200
+      await Bun.sleep(100)
+      expect(fixture.state.stopped).toBe(1)
+    } finally { await close(server); await close(fixture.upstream) }
+  })
+}

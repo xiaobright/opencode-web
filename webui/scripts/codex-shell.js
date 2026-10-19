@@ -362,32 +362,15 @@
     try {
       var responses = await Promise.all([
         fetch("/api/project", { headers: { accept: "application/json" } }),
-        fetch("/api/session?order=desc", { headers: { accept: "application/json" } }),
-        fetch("/api/session/active", { headers: { accept: "application/json" } }),
+        window.__ocwBackground.refresh(),
       ])
-      if (!responses[0].ok || !responses[1].ok) throw new Error("HTTP " + responses[0].status + "/" + responses[1].status)
+      if (!responses[0].ok) throw new Error("HTTP " + responses[0].status)
       var projects = await responses[0].json()
-      var sessions = await responses[1].json()
-      // 权威的运行状态：事件流只覆盖「页面打开之后」发生的事，页面打开前就在跑的
-      // 会话（尤其是 MCP 委派的后台任务）靠这个才亮得起来。
-      state.activeIds = new Set(
-        responses[2].ok ? Object.keys((await responses[2].json()).data || {}) : [],
-      )
-      var all = (sessions && sessions.data) || []
-      // 后台任务单独成组；工作区分组只收人自己开的会话。
-      state.background = all
-        .filter(function (session) {
-          return isBackground(session) && !session.parentID && !(session.time && session.time.archived)
-        })
-        .sort(function (a, b) {
-          return updated(b) - updated(a)
-        })
-      state.groups = group(
-        Array.isArray(projects) ? projects : [],
-        all.filter(function (session) {
-          return !isBackground(session)
-        }),
-      )
+      var data = responses[1]
+      state.activeIds = new Set(Object.keys(data.active))
+      state.background = data.items
+      state.backgroundNext = data.next
+      state.groups = group(Array.isArray(projects) ? projects : [], data.all.filter(function (session) { return !isBackground(session) }))
       state.error = ""
       state.loaded = true
     } catch (error) {
@@ -742,6 +725,7 @@
   /* 后台任务栏位：MCP 委派出去的会话，按调用方/模型标注，运行中复用行左侧的像素格。 */
   function renderBackgroundLane(list, filterText, activeId) {
     var sessions = state.background
+    if (state.error) list.appendChild(message("读取失败，保留上次结果：" + state.error))
     if (filterText) {
       var needle = String(filterText).toLowerCase()
       sessions = sessions.filter(function (session) {
@@ -750,11 +734,13 @@
     }
 
     if (!sessions.length) {
-      list.appendChild(message(filterText ? "没有匹配的后台任务" : "还没有后台任务。用 MCP 委派后，这里会按会话列出。"))
+      if (!state.error) list.appendChild(message(filterText ? "没有匹配的后台任务" : "还没有后台任务。用 MCP 委派后，这里会按会话列出。"))
+      if (state.backgroundNext) list.appendChild(historyButton())
       return
     }
 
     for (var i = 0; i < sessions.length; i++) list.appendChild(sessionRow(sessions[i], activeId, { background: true }))
+    if (state.backgroundNext) list.appendChild(historyButton())
     syncBusy()
   }
 
@@ -869,9 +855,9 @@
 
   function idleLabel(messages) {
     var idle = (messages || []).find(function (message) {
-      return message.type === "idle"
+      return message.type === "idle" || message.type === "user"
     })
-    if (!idle) return "空闲"
+    if (!idle || idle.type === "user") return "结果待确认"
     if (idle.outcome === "succeeded") return "已完成"
     if (idle.outcome === "failed") return "失败"
     if (idle.outcome === "interrupted") return "已取消"
@@ -943,43 +929,34 @@
     }
   }
 
-  async function refreshMonitor() {
+  async function refreshMonitor(more) {
     if (!monitor || monitor.hidden || monitorBusy) return
     monitorBusy = true
     try {
-      var responses = await Promise.all([
-        fetch("/api/session?order=desc", { headers: { accept: "application/json" } }),
-        fetch("/api/session/active", { headers: { accept: "application/json" } }),
-      ])
-      var sessions = responses[0].ok ? (await responses[0].json()).data || [] : []
-      var active = responses[1].ok ? (await responses[1].json()).data || {} : {}
-      var items = sessions.filter(function (session) {
-        return isBackground(session) && !session.parentID
-      })
-      var shown = items.slice(0, 24)
-      var details = await Promise.all(
-        shown.map(function (session) {
-          return fetch("/api/session/" + session.id + "/message?limit=8", { headers: { accept: "application/json" } })
-            .then(function (response) {
-              return response.ok ? response.json() : null
-            })
-            .then(function (body) {
-              return (body && body.data) || []
-            })
-            .catch(function () {
-              return []
-            })
-        }),
-      )
-      renderMonitor(shown, active, details)
+      var data = await (more === true ? window.__ocwBackground.loadMore() : window.__ocwBackground.refresh())
+      var details = await window.__ocwBackground.details(data.items)
+      state.activeIds = new Set(Object.keys(data.active))
+      state.background = data.items
+      state.backgroundNext = data.next
+      state.error = ""
+      renderList(query())
+      renderMonitor(data.items, data.active, details, data.next)
     } catch (error) {
-      // 保留上一帧；下一轮再试。
+      monitor.querySelector(".ocw-panel-sub").textContent = "读取失败，保留上次结果：" + String(error.message || error)
     } finally {
       monitorBusy = false
     }
   }
 
-  function renderMonitor(items, active, details) {
+  function historyButton() {
+    var button = el("button", "ocw-more")
+    button.type = "button"
+    button.textContent = "加载更多历史"
+    button.addEventListener("click", function () { refreshMonitor(true) })
+    return button
+  }
+
+  function renderMonitor(items, active, details, next) {
     if (!monitor) return
     var running = items.filter(function (session) {
       return active[session.id]
@@ -988,20 +965,23 @@
     monitor.querySelector(".ocw-panel-sub").textContent =
       "MCP 委派 · " +
       (running ? running + " 个在运行" : "当前没有运行中的任务") +
-      " · 每 2.5 秒刷新"
+      " · 每 2.5 秒刷新" + (details.some(function (item) { return item.error }) ? " · 部分详情读取失败，状态待确认" : "")
 
     var list = monitor.querySelector(".ocw-panel-list")
     list.textContent = ""
     if (!items.length) {
       list.appendChild(message("还没有后台任务。用 MCP 委派后，这里会按会话显示运行状态、目录和工具流程。"))
+      if (next) list.appendChild(historyButton())
       return
     }
     items.forEach(function (session, index) {
       list.appendChild(taskCard(session, Boolean(active[session.id]), details[index]))
     })
+    if (next) list.appendChild(historyButton())
   }
 
-  function taskCard(session, running, messages) {
+  function taskCard(session, running, detail) {
+    var messages = detail.messages
     var card = el("article", "ocw-task")
     card.setAttribute("data-id", session.id)
     if (running) card.classList.add("is-running")
@@ -1013,7 +993,8 @@
     title.title = title.textContent
     head.appendChild(title)
     var state = el("span", "ocw-task-state")
-    state.textContent = running ? "运行中" : idleLabel(messages)
+    state.textContent = detail.error ? "状态待确认" : (running ? "运行中" : detail.pending ? "等待投递" : idleLabel(messages))
+    if (detail.pending) state.textContent += " · " + detail.pending + " 条待处理"
     head.appendChild(state)
 
     var meta = el("div", "ocw-task-meta")
@@ -1030,7 +1011,7 @@
       steps.slice(0, 6).forEach(function (step, index) {
         if (index) flow.appendChild(el("span", "ocw-task-arrow", "→"))
         var chip = el("span", "ocw-flow-step")
-        if (step.running) chip.classList.add("is-running")
+        if (running && !detail.error && step.running) chip.classList.add("is-running")
         chip.textContent = step.name
         flow.appendChild(chip)
       })

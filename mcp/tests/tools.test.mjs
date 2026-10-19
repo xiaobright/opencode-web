@@ -6,6 +6,7 @@ import { join } from "node:path"
 import * as module from "../opencode.mjs"
 import { createTools } from "../tools.mjs"
 import { fixtureApi, startFixture } from "./fixture.mjs"
+import { readSnapshot, readOutput } from "../tasks.mjs"
 
 const fixtures = []
 afterEach(async () => {
@@ -33,7 +34,8 @@ test("delegate hands over a task and returns the answer, pre-approved and stampe
   expect(result.structured.state).toBe("done")
   expect(result.structured.text).toBe("PONG.")
   expect(result.structured.session_id).toStartWith("ses_")
-  expect(result.text).toBe(`Session ${result.structured.session_id} · done · 0.0s\n\nPONG.`)
+  expect(result.structured.input_status).toBe("settled")
+  expect(result.structured.pending_inputs).toBe(0)
 
   const session = [...fixture.sessions.values()][0]
   expect(session.title).toBe("say pong")
@@ -205,13 +207,19 @@ test("long answers are bounded and marked as truncated", async () => {
 test("delegation carries the working agreement, and OPENCODE_MCP_PROTOCOL=off removes it", async () => {
   const withProtocol = await setup()
   await withProtocol.tools.opencode_delegate.handler({ task: "do it" })
-  expect(withProtocol.fixture.state.promptTexts[0]).toStartWith("[Delegation protocol]")
-  expect(withProtocol.fixture.state.promptTexts[0]).toContain("do it")
-  expect(withProtocol.fixture.state.promptTexts[0]).toContain("plan:")
+  expect(withProtocol.fixture.state.promptTexts).toEqual(["do it"])
+  expect([...withProtocol.fixture.sessions.values()][0].instructions["delegation-protocol"]).toContain("plan:")
+  expect(withProtocol.fixture.state.instructionWrites).toBe(1)
+
+  const fallback = await setup({ instructions: false })
+  await fallback.tools.opencode_delegate.handler({ task: "do it" })
+  expect(fallback.fixture.state.promptTexts[0]).toStartWith("[Delegation protocol]")
+  expect(fallback.fixture.state.instructionWrites).toBe(0)
 
   const without = await setup({ env: { OPENCODE_MCP_PROTOCOL: "off" } })
   await without.tools.opencode_delegate.handler({ task: "do it" })
   expect(without.fixture.state.promptTexts).toEqual(["do it"])
+  expect(without.fixture.state.instructionWrites).toBe(0)
 })
 
 test("status reports the plan, the running step, the progress line and the diff", async () => {
@@ -239,5 +247,123 @@ test("plan and progress lines stay out of the final answer", async () => {
   const { tools } = await setup({ replies: ["plan: 1) a 2) b\nprogress: 1/2 a done -> b\nREAL ANSWER"] })
   const result = await tools.opencode_delegate.handler({ task: "x" })
   expect(result.structured.text).toBe("REAL ANSWER")
+})
+
+test("durable admission precedes delivery; cancelled execution retains Inbox across reconnect", async () => {
+  const { tools, api, env, fixture } = await setup({ deliveryDelayMs: 60_000, env: { OPENCODE_MCP_DELEGATE_WAIT_MS: "20" } })
+  const result = await tools.opencode_delegate.handler({ task: "not delivered yet" })
+  expect(result.structured.input_status).toBe("queued")
+  expect(result.structured.state).toBe("running")
+  const id = result.structured.session_id
+  expect(fixture.sessions.get(id).messages).toEqual([])
+  const cancelled = await tools.opencode_session.handler({ action: "cancel", session_id: id })
+  expect(cancelled.structured.state).toBe("queued")
+  expect(cancelled.structured.last_outcome).toBe("interrupted")
+  expect(cancelled.structured.pending_inputs).toBe(1)
+  expect(cancelled.text).toContain("1 pending input(s) retained")
+  const reconnected = createTools({ api, env })
+  const waited = await reconnected.opencode_session.handler({ action: "wait", session_id: id })
+  expect(waited.structured.input_id).toBe(result.structured.input_id)
+  expect(waited.structured.input_status).toBe("queued")
+  expect(waited.structured.text).toBeUndefined()
+})
+
+test("parked input never inherits the previous success, and wait does not resume it", async () => {
+  const { tools, api, fixture } = await setup()
+  const first = await tools.opencode_delegate.handler({ task: "one" })
+  const id = first.structured.session_id
+  const parked = await api.prompt(id, "two", { resume: false, delivery: "queue" })
+  const result = await tools.opencode_session.handler({ action: "wait", session_id: id })
+  expect(result.structured.input_id).toBe(parked.id)
+  expect(result.structured.state).toBe("queued")
+  expect(result.structured.last_outcome).toBe("succeeded")
+  expect(fixture.sessions.get(id).running).toBe(false)
+  expect(result.structured.text).toBeUndefined()
+})
+
+test("concurrent steers share the next idle boundary and exclude earlier or later execution output", async () => {
+  const { tools, api, fixture } = await setup({ replyDelayMs: 60_000, env: { OPENCODE_MCP_DELEGATE_WAIT_MS: "20", OPENCODE_MCP_WAIT_MS: "20" } })
+  const first = await tools.opencode_delegate.handler({ task: "one" })
+  const id = first.structured.session_id
+  const second = await tools.opencode_session.handler({ action: "message", session_id: id, text: "steer" })
+  expect(fixture.state.deliveries).toEqual(["steer", "steer"])
+  fixture.finish(id)
+  const left = await readSnapshot(api, id, first.structured.input_id)
+  const right = await readSnapshot(api, id, second.structured.input_id)
+  expect(left.inputStatus).toBe("settled")
+  expect(right.inputStatus).toBe("settled")
+  const messages = fixture.sessions.get(id).messages
+  expect(messages.filter((item) => item.type === "idle")).toHaveLength(1)
+  messages.push({ id: "msg_other", type: "user" }, { id: "msg_unrelated", type: "assistant", content: [{ type: "text", text: "unrelated answer" }] })
+  expect(readOutput([...messages].reverse(), { inputID: first.structured.input_id }).text).toBe("PONG.")
+  messages.push({ id: "msg_later_idle", type: "idle", outcome: "failed" })
+  const original = await readSnapshot(api, id, first.structured.input_id)
+  expect(original.state).toBe("done")
+  expect(original.inputOutcome).toBe("succeeded")
+  expect(original.lastOutcome).toBe("failed")
+})
+
+test("stable admission IDs adopt the first payload, including after delivery", async () => {
+  const { api, fixture } = await setup({ replyDelayMs: 60_000 })
+  const id = "ses_stable"
+  await Promise.all([api.createSession({ id, title: "first", directory: process.cwd() }), api.createSession({ id, title: "second", directory: process.cwd() })])
+  const [first, retry] = await Promise.all([
+    api.prompt(id, "first", { id: "msg_stable", metadata: { origin: "first" }, delivery: "queue", resume: false }),
+    api.prompt(id, "second", { id: "msg_stable", metadata: { origin: "second" }, delivery: "steer", resume: false }),
+  ])
+  expect(first).toEqual(retry)
+  expect(first.payload.text).toBe("first")
+  expect(first.delivery).toBe("queue")
+  expect(first.payload.metadata).toEqual({ origin: "first" })
+  fixture.deliver(id)
+  const afterDelivery = await api.prompt(id, "third", { id: "msg_stable", resume: false })
+  expect(afterDelivery.id).toBe(first.id)
+  expect(afterDelivery.payload).toEqual(first.payload)
+  expect(await api.inbox(id)).toEqual([])
+  expect(fixture.state.created).toBe(1)
+  expect(fixture.state.prompts).toBe(1)
+  const another = await api.createSession({ directory: process.cwd() })
+  await expect(api.prompt(another.id, "conflict", { id: "msg_stable", resume: false })).rejects.toThrow("409")
+})
+
+test("a long execution pages back to its input; missing history returns unknown, never another answer", async () => {
+  const { tools, api, fixture } = await setup()
+  const first = await tools.opencode_delegate.handler({ task: "long history" })
+  const id = first.structured.session_id
+  const messages = fixture.sessions.get(id).messages
+  const idle = messages.pop()
+  for (let index = 0; index < 420; index++) messages.push({ id: `msg_step${index}`, type: "assistant", content: [{ type: "text", text: `step ${index}` }] })
+  messages.push(idle)
+  const readBefore = fixture.state.messageReads
+  const result = await tools.opencode_session.handler({ action: "wait", session_id: id })
+  expect(result.structured.input_id).toBe(first.structured.input_id)
+  expect(result.structured.state).toBe("done")
+  expect(result.structured.text).toContain("step 419")
+  expect(fixture.state.messageReads - readBefore).toBe(4) // user lookup + three pages
+  for (let index = 0; index < 650; index++) messages.push({ id: `msg_noise${index}`, type: "assistant", content: [{ type: "text", text: "unrelated" }] })
+  const unknown = await tools.opencode_session.handler({ action: "wait", session_id: id })
+  expect(unknown.structured.state).toBe("unknown")
+  expect(unknown.structured.history_truncated).toBe(true)
+  expect(unknown.structured.text).toBeUndefined()
+  const absent = await readSnapshot(api, id, "msg_missing")
+  expect(absent.inputStatus).toBe("unknown")
+})
+
+test("shutdown without idle and failed active probes cannot report success", async () => {
+  const { tools, fixture, api, env } = await setup({ replyDelayMs: 60_000, env: { OPENCODE_MCP_DELEGATE_WAIT_MS: "20" } })
+  const first = await tools.opencode_delegate.handler({ task: "one" })
+  fixture.sessions.get(first.structured.session_id).running = false
+  const result = await tools.opencode_session.handler({ action: "status", session_id: first.structured.session_id })
+  expect(result.structured.state).toBe("unknown")
+  expect(result.structured.input_status).toBe("delivered")
+  const broken = createTools({ env, api: { ...api, activeSessions: async () => { throw new Error("active unavailable") } } })
+  await expect(broken.opencode_delegate.handler({ task: "two" })).rejects.toThrow(/Session ses_.*input msg_.*active unavailable/)
+})
+
+test("disabled protocol preserves plan-like output and enabled protocol preserves code fences", async () => {
+  const off = await setup({ replies: ["plan: literal data"], env: { OPENCODE_MCP_PROTOCOL: "off" } })
+  expect((await off.tools.opencode_delegate.handler({ task: "one" })).structured.text).toBe("plan: literal data")
+  const on = await setup({ replies: ["plan: 1) do it\n```yaml\nplan: literal data\n```"] })
+  expect((await on.tools.opencode_delegate.handler({ task: "one" })).structured.text).toBe("```yaml\nplan: literal data\n```")
 })
 

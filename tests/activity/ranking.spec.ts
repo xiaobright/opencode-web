@@ -1,6 +1,7 @@
 import { test, expect } from "../../research/runtime-fold/deps.mjs"
 import { readFileSync } from "node:fs"
 
+const background = readFileSync(new URL("../../webui/scripts/background-data.js", import.meta.url), "utf8")
 const shell = readFileSync(new URL("../../webui/scripts/codex-shell.js", import.meta.url), "utf8")
 const css = readFileSync(new URL("../../webui/styles/codex.css", import.meta.url), "utf8")
 const catalog = ["Alpha", "Beta", "Gamma"].map((name) => ({ id: name, name, providerID: "opencode", context: 128000 }))
@@ -36,7 +37,7 @@ for (const firstFails of [false, true]) {
       if (url.pathname === "/api/project") return route.fulfill({ json: [] })
       if (url.pathname.startsWith("/api/session")) return route.fulfill({ json: { data: url.pathname.endsWith("/active") ? {} : [] } })
       if (url.pathname === "/ranking-fixture")
-        return route.fulfill({ contentType: "text/html", body: `<!doctype html><meta charset="utf-8"><style>${css}</style><script>${shell}</script>` })
+        return route.fulfill({ contentType: "text/html", body: `<!doctype html><meta charset="utf-8"><style>${css}</style><script>${background}</script><script>${shell}</script>` })
       return route.abort()
     })
     try {

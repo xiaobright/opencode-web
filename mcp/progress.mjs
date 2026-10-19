@@ -3,7 +3,7 @@
 // opencode V2 removed the todowrite tool (see REMOVED_TOOLS in the v1 migration), so
 // requiring a todo list would send the agent hunting for a tool that does not exist.
 // The durable protocol is text: a one-line plan, then one `progress:` line per step.
-// MCP cannot inject a system prompt, so the requirement rides in the task message.
+// Prefer a durable API instruction entry; older compatible builds use a task preamble.
 // When a todo tool does exist, the agent mirrors the plan there as well.
 
 export const AGREEMENT = [
@@ -143,9 +143,18 @@ export function formatDuration(ms) {
 
 /** Remove the protocol lines from a final answer: they belong to status, not to the reply. */
 export function stripProtocol(text) {
+  let fence = null
   return String(text ?? "")
     .split(/\r?\n/)
-    .filter((line) => !/^\s*(?:\*\*)?(?:plan|progress|进度)(?:\*\*)?\s*[:：]/i.test(line))
+    .filter((line) => {
+      const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1]
+      if (marker) {
+        if (!fence) fence = marker
+        else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null
+        return true
+      }
+      return fence || !/^\s*(?:\*\*)?(?:plan|progress|进度)(?:\*\*)?\s*[:：]/i.test(line)
+    })
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()

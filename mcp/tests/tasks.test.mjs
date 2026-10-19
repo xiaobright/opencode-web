@@ -10,7 +10,8 @@ test("the latest persisted user message bounds the answer and excludes an old id
     assistant("old-answer", "old answer"),
     { id: "first-user", type: "user" },
   ]
-  expect(stateFromMessages(history)).toBe("running")
+  expect(stateFromMessages(history)).toBe("unknown")
+  expect(stateFromMessages(history, { active: true })).toBe("running")
   expect(readOutput(history).text).toBe("")
   history.unshift(assistant("step", "step output"))
   history.unshift(assistant("answer", "new answer"))

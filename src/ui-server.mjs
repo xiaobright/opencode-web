@@ -91,30 +91,50 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
   let lastTouch = Date.now()
   let streams = 0
   let sleeps = 0
+  let sweeping = false
+  let closed = false
+  let sweepTimer
 
   if (idleLimit > 0) {
-    const timer = setInterval(() => void sweep(), sweepEvery)
-    timer.unref?.() // never keep a test process (or a gateway nobody watches) alive for this
+    sweepTimer = setInterval(() => void sweep(), sweepEvery)
+    sweepTimer.unref?.()
   }
 
   async function sweep() {
-    if (backend.phase !== "ready") return
-
-    const verdict = idleVerdict({
-      streams,
-      idleFor: Date.now() - lastTouch,
-      sessionAge: await newestSessionAge(),
-      ms: idleLimit,
-    })
-    if (verdict.action === "keep") return
-
+    if (closed || sweeping || backend.phase !== "ready") return
+    sweeping = true
     try {
-      await backend.stop()
-      backend.retire()
-      sleeps++
-      log(`auto-sleep: stopped the opencode background service (${verdict.reason})`)
-    } catch (error) {
-      log(`auto-sleep failed: ${error.message}`)
+      const verdict = idleVerdict({
+        streams,
+        idleFor: Date.now() - lastTouch,
+        sessionAge: await newestSessionAge(),
+        ms: idleLimit,
+      })
+      if (verdict.action === "keep") return
+
+      try {
+        // Recheck immediately before stopping: a silent tool can be busy for hours.
+        // A failed/unsupported probe cannot establish that this shared service is idle.
+        const found = await backend.discover()
+        if (!found) return
+        const response = await fetch(`${found.url}/api/session/active`, {
+          headers: { authorization: authorization(found) },
+          signal: AbortSignal.timeout(5_000),
+        })
+        if (!response.ok) return
+        const body = await response.json()
+        if (!body?.data || Array.isArray(body.data) || typeof body.data !== "object") return
+        const latest = idleVerdict({ streams, active: Object.keys(body.data).length, idleFor: Date.now() - lastTouch, ms: idleLimit })
+        if (closed || backend.phase !== "ready" || latest.action !== "sleep") return
+        await backend.stop()
+        backend.retire()
+        sleeps++
+        log(`auto-sleep: stopped the opencode background service (${verdict.reason})`)
+      } catch (error) {
+        log(`auto-sleep failed: ${error.message}`)
+      }
+    } finally {
+      sweeping = false
     }
   }
 
@@ -177,7 +197,7 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
     }
   }
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost")
 
     // Everything except the tray's own metadata probe counts as "somebody is here". The
@@ -272,6 +292,8 @@ export function createUiServer({ overlayDir, log = () => {}, lazy = false, backe
 
     return void proxy(request, response, log, shell, inject, () => lazy ? backend.discover() : backend.start())
   })
+  server.on("close", () => { closed = true; clearInterval(sweepTimer) })
+  return server
 }
 
 async function readBody(request, limit) {
