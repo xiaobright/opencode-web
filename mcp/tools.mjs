@@ -22,6 +22,9 @@ export const BACKGROUND_ORIGIN = "opencode-delegate"
 
 const ACTIONS = ["status", "wait", "message", "cancel"]
 
+/** Default per-call wait budget. Keep it well under the SDK's 60s request timeout. */
+export const DEFAULT_WAIT_MS = 30_000
+
 function settings(env) {
   const number = (key, fallback) => {
     const value = Number(env[key])
@@ -37,7 +40,7 @@ function settings(env) {
     protocol: env.OPENCODE_MCP_PROTOCOL !== "off",
     delegateWaitMs: number("OPENCODE_MCP_DELEGATE_WAIT_MS", 20_000),
     // The SDK defaults to a 60s request timeout; leave time for discovery and reporting.
-    waitMs: number("OPENCODE_MCP_WAIT_MS", 30_000),
+    waitMs: number("OPENCODE_MCP_WAIT_MS", DEFAULT_WAIT_MS),
     maxChars: number("OPENCODE_MCP_MAX_CHARS", 8_000),
   }
 }

@@ -122,7 +122,7 @@ cd mcp && npm install && bun test ./tests
 - `tests/tools.test.mjs` / `tests/tasks.test.mjs`：假 opencode 服务覆盖派活、续等、失败/取消结果、续聊超时后的输出边界、模型排序/钉死/回落、绝对目录校验、参数隔离、输出截断；包含所选输入已结束而其他输入仍排队/执行、错误诊断限长且不返回原始响应体。夹具只注入 HTTP 传输，使用生产 API 包装器；区分接收/投递/结束，覆盖并发重试、保留队列、长历史分页和未知状态。
 - `tests/client.test.mjs`：真实 Node HTTP 客户端及生产重试代码验证输入 ID 重试只入队一次、创建请求不携带 session ID、创建响应丢失后不重试、中断不重试，以及契约读取丢失响应后安全重试、超过连接 TTL 后仍复用契约缓存。
 - `tests/compatibility.test.mjs`：直接使用官方生成 OpenAPI 的契约快照，检查能力识别、缺失能力时不创建会话，以及契约缓存的并发合并、10 分钟过期、服务身份隔离和失败恢复。
-- `tests/server.test.mjs`：官方 SDK 客户端通过 Node stdio 启动真实 server，验证两个工具、丢失响应后的稳定输入 ID、默认 30 秒续等、取消保留队列及 MCP 进程重连（`XDG_STATE_HOME` 指向夹具，不碰真实服务）；整组测试约需 40 秒。
+- `tests/server.test.mjs`：官方 SDK 客户端通过 Node stdio 启动真实 server，验证两个工具、丢失响应后的稳定输入 ID、默认等待预算上限、短预算续等、取消保留队列及 MCP 进程重连（`XDG_STATE_HOME` 指向夹具，不碰真实服务）；整组测试约需 40 秒。
 - 网关休眠：仓库根目录运行 `bun test ./tests/startup/idle.test.mjs`；后台监控与排序：在 `tests/activity` 运行 `bun run run.mjs background.spec.ts ranking.spec.ts`。均使用隔离夹具，不调用真实模型。
 
 真实免费模型验收需显式运行（仓库根目录）：

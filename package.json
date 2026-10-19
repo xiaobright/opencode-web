@@ -12,6 +12,9 @@
     "install-hook": "bun run scripts/install-hook.mjs",
     "uninstall-hook": "bun run scripts/install-hook.mjs --uninstall",
     "mcp": "node mcp/index.mjs",
-    "test:mcp": "bun test mcp/tests"
+    "test": "bun scripts/test.mjs",
+    "test:fast": "bun scripts/test.mjs --fast",
+    "test:mcp": "bun test mcp/tests",
+    "test:live": "node mcp/live-smoke.mjs --run"
   }
 }

@@ -84,18 +84,19 @@ test("stdio server exposes two tools and delegates through a discovered service"
   }
 }, 30_000)
 
-test("the default wait returns a running result before the SDK request timeout", async () => {
+test("a wait without a configured budget returns a running result well inside the SDK timeout", async () => {
   const fixture = await startFixture({ replyDelayMs: 120_000 })
-  const { client, transport } = fixtureClient(fixture, { OPENCODE_MCP_DELEGATE_WAIT_MS: "25" })
+  // A short budget keeps this fast; the default budget is asserted in tools.test.mjs.
+  const { client, transport } = fixtureClient(fixture, { OPENCODE_MCP_DELEGATE_WAIT_MS: "25", OPENCODE_MCP_WAIT_MS: "1200" })
   try {
     await client.connect(transport)
     const delegated = await call(client, { name: "opencode_delegate", arguments: { task: "long fixture task" } })
     const sessionID = delegated.structuredContent.session_id
     expect(delegated.structuredContent.state).toBe("running")
     const started = Date.now()
-    // No client timeout override: this exercises the SDK's normal 60s limit.
+    // No client timeout override: the SDK's normal request timeout still applies.
     const waited = await call(client, { name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
-    expect(Date.now() - started).toBeLessThan(55_000)
+    expect(Date.now() - started).toBeLessThan(10_000)
     expect(waited.isError).toBeFalsy()
     expect(waited.structuredContent.state).toBe("running")
     expect(waited.content[0].text).toContain('action="wait"')
@@ -107,7 +108,7 @@ test("the default wait returns a running result before the SDK request timeout",
     await client.close().catch(() => {})
     await fixture.close()
   }
-}, 70_000)
+}, 20_000)
 
 test("a timed-out message can be resumed through a new Node stdio process", async () => {
   const fixture = await startFixture({ replyDelayMs: 120_000, replies: ["first answer", "second answer"] })

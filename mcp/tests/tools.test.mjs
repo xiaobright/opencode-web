@@ -4,9 +4,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import * as module from "../opencode.mjs"
-import { createTools } from "../tools.mjs"
+import { createTools, DEFAULT_WAIT_MS } from "../tools.mjs"
 import { fixtureApi, startFixture } from "./fixture.mjs"
 import { readSnapshot, readOutput } from "../tasks.mjs"
+
+test("the default wait budget leaves headroom under the client request timeout", () => {
+  // MCP clients commonly give up at 60s; a longer default wait would surface as a
+  // client-side timeout instead of a running result.
+  expect(DEFAULT_WAIT_MS).toBeLessThanOrEqual(45_000)
+})
 
 const fixtures = []
 afterEach(async () => {

@@ -172,7 +172,17 @@ opencode 里那批免费模型只能在 opencode 里用。`mcp/` 是一个 stdio
 
 `tests/` 包含状态提示、弹层布局和按需启动验证；`mcp/tests/` 覆盖委派与管理的工具语义，并有一条用官方 SDK 客户端跑 stdio 全链路的冒烟；`research/` 和 `docs/` 保留折叠实验及上游 issue 记录，正式页面不会加载实验代码。研究中滚动位移仍非零，不能将原型视为已解决抖动的折叠功能。
 
-服务逻辑测试可在 `tests/startup` 运行 `bun test ./backend.test.mjs ./cli.test.mjs`。浏览器测试还需 OpenCode 源码的 Playwright 依赖，通过 `OPENCODE_SOURCE` 指定源码目录；详见各测试目录 README。状态/图片布局测试依赖本地保存的官方静态资源，长会话性能测试还依赖私人会话快照，这些忽略文件未上传，新克隆不能直接复现相关测试，仓库保留了汇总结果和验证范围。
+所有套件有一个入口（在仓库根目录）：
+
+```bash
+bun run test          # 全套：单元 + 三个浏览器套件，并行跑，约 36 秒
+bun run test:fast     # 只跑单元与托盘策略，约 10 秒
+bun run test:live     # 额外跑真实的免费模型验收（显式 opt-in，会消耗额度）
+```
+
+`scripts/test.mjs` 按端口隔离把三套浏览器测试和单元测试并行启动，而不是各自串行；`--only=mcp,overlays-browser` 可只跑其中几组，`--verbose` 直接透传输出。MCP 的默认等待预算不再靠真等 30 秒验证：`mcp/tests/tools.test.mjs` 断言常量上限，`server.test.mjs` 用 1.2 秒预算跑通同一条路径。
+
+服务逻辑测试也可单独在 `tests/startup` 运行 `bun test ./backend.test.mjs ./cli.test.mjs`。浏览器测试还需 OpenCode 源码的 Playwright 依赖，通过 `OPENCODE_SOURCE` 指定源码目录；详见各测试目录 README。状态/图片布局测试依赖本地保存的官方静态资源，长会话性能测试还依赖私人会话快照，这些忽略文件未上传，新克隆不能直接复现相关测试，仓库保留了汇总结果和验证范围。
 
 ## 许可
 
