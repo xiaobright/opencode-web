@@ -10,6 +10,8 @@
     "tray": "bun run scripts/tray.mjs",
     "standby": "bun run scripts/tray.mjs --lazy",
     "install-hook": "bun run scripts/install-hook.mjs",
-    "uninstall-hook": "bun run scripts/install-hook.mjs --uninstall"
+    "uninstall-hook": "bun run scripts/install-hook.mjs --uninstall",
+    "mcp": "node mcp/index.mjs",
+    "test:mcp": "bun test mcp/tests"
   }
 }

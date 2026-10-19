@@ -1,0 +1,21 @@
+{
+  "name": "opencode-delegate-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server that delegates work to the local opencode background service and its free models.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "opencode-delegate-mcp": "./index.mjs"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "bun test ./tests"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0"
+  }
+}

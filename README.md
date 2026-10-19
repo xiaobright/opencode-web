@@ -25,6 +25,7 @@ opencode-web/
 │   └── install-hook.mjs 安装/卸载上面那个插件
 ├── icons/opencode.ico   托盘图标：opencode 官方应用图标
 ├── webui/               覆盖层，默认空：放了什么就替换官方的什么（`styles/`、`scripts/` 是注入进去，不是替换）
+├── mcp/                 可选：把任务派给免费模型的 MCP server（自带依赖，单独 npm install）
 ├── start.vbs            日常用：托盘 + WebUI + 浏览器（无窗口）
 ├── start-lazy.vbs       自启用：只起托盘和网页代理，点击图标后启动后台
 ├── start.cmd            只起 WebUI（有控制台，方便看日志）
@@ -32,7 +33,7 @@ opencode-web/
 └── README.md
 ```
 
-零依赖，只要本机有 `bun` 和 `opencode`。
+网关本体零依赖，只要本机有 `bun` 和 `opencode`；`mcp/` 是可选子包，自己带一个 MCP SDK 依赖。
 
 ## 用法
 
@@ -146,6 +147,16 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 
 想恢复官方界面：把 `webui/styles/` 和 `webui/scripts/` 移出去，刷新即可，不用重启。注意**移出 `scripts/` 会一并失去那个 `Accept` 补丁**，界面会退化成用不了（只移 `styles/` 则只丢外观）。方案与取舍记在 `docs/codex-style-plan.md`。
 
+## 把活派给免费模型：`mcp/`
+
+opencode 里那批免费模型（默认 `opencode/deepseek-v4.1-flash-free`，还有 MiMo / GLM / Big Pickle）只能在 opencode 里用。`mcp/` 是一个 stdio MCP server，把这批模型开放给任何支持 MCP 的 agent：派任务、等答复、看状态、增量取输出、续聊、取消，一共四个工具（`opencode_delegate` / `opencode_task` / `opencode_models` / `opencode_help`）。
+
+```json
+{ "mcpServers": { "opencode": { "command": "node", "args": ["<repo>/mcp/index.mjs"] } } }
+```
+
+它和网页端共用同一个后台服务（直接读 `service*.json`，不需要配地址和密码）；服务被自动休眠后，下次调用会自己拉起。委派跑的是真实的 opencode 会话，默认会话级预授权，所以无人值守也不会卡在工具审批上；任务的身份是 `session_id`，MCP 重启后照样能管理。完整说明、环境变量和测试见 `mcp/README.md`。
+
 ## 注意
 
 - **不要**去 patch opencode 官方二进制换界面：官方版本会把界面编译进可执行文件，改了升级就没了；这个项目不动它，界面直接从后台服务转发。
@@ -156,7 +167,7 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 
 ## 测试与研究记录
 
-`tests/` 包含状态提示、弹层布局和按需启动验证；`research/` 和 `docs/` 保留折叠实验及上游 issue 记录，正式页面不会加载实验代码。研究中滚动位移仍非零，不能将原型视为已解决抖动的折叠功能。
+`tests/` 包含状态提示、弹层布局和按需启动验证；`mcp/tests/` 覆盖委派与管理的工具语义，并有一条用官方 SDK 客户端跑 stdio 全链路的冒烟；`research/` 和 `docs/` 保留折叠实验及上游 issue 记录，正式页面不会加载实验代码。研究中滚动位移仍非零，不能将原型视为已解决抖动的折叠功能。
 
 服务逻辑测试可在 `tests/startup` 运行 `bun test ./backend.test.mjs ./cli.test.mjs`。浏览器测试还需 OpenCode 源码的 Playwright 依赖，通过 `OPENCODE_SOURCE` 指定源码目录；详见各测试目录 README。状态/图片布局测试依赖本地保存的官方静态资源，长会话性能测试还依赖私人会话快照，这些忽略文件未上传，新克隆不能直接复现相关测试，仓库保留了汇总结果和验证范围。
 
