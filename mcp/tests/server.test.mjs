@@ -12,26 +12,35 @@ import { startFixture } from "./fixture.mjs"
 
 const entry = fileURLToPath(new URL("../index.mjs", import.meta.url))
 
-test("stdio server exposes two tools and delegates through a discovered service", async () => {
-  const fixture = await startFixture()
+function fixtureClient(fixture, env = {}) {
   const root = mkdtempSync(join(tmpdir(), "ocw-mcp-proto-"))
   const stateHome = join(root, "state")
   mkdirSync(join(stateHome, "opencode"), { recursive: true })
   writeFileSync(join(stateHome, "opencode", "service.json"), JSON.stringify({ url: fixture.url, password: "fixture", pid: 1 }))
 
   const transport = new StdioClientTransport({
-    command: process.execPath,
+    command: "node",
     args: [entry],
     env: {
       ...process.env,
       XDG_STATE_HOME: stateHome,
       OPENCODE_BIN: join(root, "no-such-opencode.exe"),
       OPENCODE_MCP_DIRECTORY: process.cwd(),
+      OPENCODE_WEB_STATE_DIR: root,
+      OPENCODE_MCP_MODEL: "",
+      OPENCODE_MCP_WAIT_MS: "",
+      ...env,
     },
     stderr: "pipe",
   })
 
   const client = new Client({ name: "smoke", version: "0.0.0" })
+  return { client, transport }
+}
+
+test("stdio server exposes two tools and delegates through a discovered service", async () => {
+  const fixture = await startFixture()
+  const { client, transport } = fixtureClient(fixture)
   try {
     await client.connect(transport)
 
@@ -62,3 +71,53 @@ test("stdio server exposes two tools and delegates through a discovered service"
     await fixture.close()
   }
 }, 30_000)
+
+test("the default wait returns a running result before the SDK request timeout", async () => {
+  const fixture = await startFixture({ replyDelayMs: 120_000 })
+  const { client, transport } = fixtureClient(fixture, { OPENCODE_MCP_DELEGATE_WAIT_MS: "25" })
+  try {
+    await client.connect(transport)
+    const delegated = await client.callTool({ name: "opencode_delegate", arguments: { task: "long fixture task" } })
+    const sessionID = delegated.structuredContent.session_id
+    expect(delegated.structuredContent.state).toBe("running")
+    const started = Date.now()
+    // No client timeout override: this exercises the SDK's normal 60s limit.
+    const waited = await client.callTool({ name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
+    expect(Date.now() - started).toBeLessThan(55_000)
+    expect(waited.isError).toBeFalsy()
+    expect(waited.structuredContent.state).toBe("running")
+    expect(waited.content[0].text).toContain('action="wait"')
+    expect(fixture.sessions.get(sessionID).running).toBe(true)
+    fixture.finish(sessionID, "failed")
+    const finished = await client.callTool({ name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
+    expect(finished.structuredContent.state).toBe("failed")
+  } finally {
+    await client.close().catch(() => {})
+    await fixture.close()
+  }
+}, 70_000)
+
+test("a timed-out message can be resumed through a new Node stdio process", async () => {
+  const fixture = await startFixture({ replyDelayMs: 120_000, replies: ["first answer", "second answer"] })
+  const env = { OPENCODE_MCP_DELEGATE_WAIT_MS: "25", OPENCODE_MCP_WAIT_MS: "25" }
+  const first = fixtureClient(fixture, env)
+  const second = fixtureClient(fixture, env)
+  try {
+    await first.client.connect(first.transport)
+    const delegated = await first.client.callTool({ name: "opencode_delegate", arguments: { task: "one" } })
+    const sessionID = delegated.structuredContent.session_id
+    fixture.finish(sessionID)
+    const message = await first.client.callTool({ name: "opencode_session", arguments: { action: "message", session_id: sessionID, text: "two" } })
+    expect(message.structuredContent.state).toBe("running")
+    await first.client.close()
+    fixture.finish(sessionID)
+    await second.client.connect(second.transport)
+    const waited = await second.client.callTool({ name: "opencode_session", arguments: { action: "wait", session_id: sessionID } })
+    expect(waited.structuredContent.state).toBe("done")
+    expect(waited.structuredContent.text).toBe("second answer")
+  } finally {
+    await first.client.close().catch(() => {})
+    await second.client.close().catch(() => {})
+    await fixture.close()
+  }
+}, 20_000)

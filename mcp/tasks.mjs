@@ -49,21 +49,28 @@ const OUTCOMES = { succeeded: "done", failed: "failed", interrupted: "cancelled"
 /** State of the last run, from the newest idle marker unless the loop is running now. */
 export function stateFromMessages(messagesNewestFirst, { active = false } = {}) {
   if (active) return "running"
-  const idle = (messagesNewestFirst ?? []).find((message) => message.type === "idle")
-  if (idle) return OUTCOMES[idle.outcome] ?? "idle"
+  for (const message of messagesNewestFirst ?? []) {
+    if (message.type === "idle") return OUTCOMES[message.outcome] ?? "idle"
+    // A new prompt supersedes the previous turn's idle marker, even before it starts.
+    if (message.type === "user") return "running"
+  }
   return (messagesNewestFirst ?? []).length > 0 ? "running" : "pending"
 }
 
 /**
- * Assistant text after `cursor` (a message id), oldest first; without a cursor the whole
- * readable window. `truncated` says the span did not fit.
+ * Assistant text in the latest user turn, oldest first. The boundary is persisted by
+ * opencode, so a later wait or a restarted MCP process reads the same turn. An explicit
+ * cursor may narrow the span further. `truncated` says the text did not fit.
  */
 export function readOutput(messagesNewestFirst, { cursor, maxChars = 8_000 } = {}) {
   const chronological = [...(messagesNewestFirst ?? [])].reverse()
   let start = 0
+  for (let index = 0; index < chronological.length; index++) {
+    if (chronological[index].type === "user") start = index + 1
+  }
   if (cursor) {
     const at = chronological.findIndex((message) => message.id === cursor)
-    if (at >= 0) start = at + 1
+    if (at >= 0) start = Math.max(start, at + 1)
   }
 
   const span = chronological.slice(start)

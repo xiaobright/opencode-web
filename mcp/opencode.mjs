@@ -3,7 +3,7 @@
 // Discovery and start/stop reuse the gateway's service module: the MCP server shares one
 // background service with the TUI, the desktop app and the web UI. The service may be
 // asleep (the web gateway stops it when idle), so every call resolves it first and a
-// dropped connection gets one retry with a fresh discovery.
+// dropped connection gets one retry with a fresh discovery only for safe requests.
 
 import { existsSync, statSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
@@ -59,11 +59,15 @@ async function fetchOnce(target, path, { method = "GET", body, timeoutMs = 30_00
 }
 
 export async function request(path, options = {}) {
+  const method = (options.method ?? "GET").toUpperCase()
+  const safe = method === "GET" || method === "HEAD" || options.retry === true
   const first = await connection()
   try {
     return await fetchOnce(first, path, options)
   } catch (error) {
     if (!isConnectionError(error) || options.retry === false) throw error
+    if (!safe)
+      throw new Error(`${method} ${path}: connection lost; the request may have been accepted and was not retried. Check the session before submitting again.`, { cause: error })
     // The service was restarted or auto-slept between calls; resolve once more.
     return await fetchOnce(await connection({ force: true }), path, options)
   }
@@ -140,6 +144,8 @@ export async function wait(sessionID, timeoutMs) {
     await request(`/api/experimental/session/${encodeURIComponent(sessionID)}/wait`, {
       method: "POST",
       timeoutMs,
+      // This POST only observes the loop; replaying it does not submit work.
+      retry: true,
     })
     return { completed: true, waitedMs: Date.now() - started }
   } catch (error) {
@@ -157,9 +163,13 @@ export async function catalog() {
 }
 
 export function normalizeDirectory(directory) {
-  const text = String(directory ?? "").trim()
+  if (typeof directory !== "string") throw new Error("directory must be an absolute path string")
+  const text = directory.trim()
   if (!text) throw new Error("directory must not be empty")
-  const absolute = isAbsolute(text) ? resolvePath(text) : resolvePath(process.cwd(), text)
+  // A Windows rooted path without a drive still depends on the launch drive.
+  if (!isAbsolute(text) || (process.platform === "win32" && /^[\\/](?![\\/])/.test(text)))
+    throw new Error("directory must be an absolute path (including a drive or UNC share on Windows)")
+  const absolute = resolvePath(text)
   if (!existsSync(absolute)) throw new Error(`directory does not exist: ${absolute}`)
   if (!statSync(absolute).isDirectory()) throw new Error(`not a directory: ${absolute}`)
   return absolute

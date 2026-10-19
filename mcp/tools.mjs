@@ -12,7 +12,7 @@
 // is what status/wait report back. opencode V2 removed the todo tool, so it is text.
 
 import { normalizeDirectory } from "./opencode.mjs"
-import { deriveTitle, formatAge, lastAssistantText, readOutput, stateFromMessages } from "./tasks.mjs"
+import { deriveTitle, formatAge, readOutput, stateFromMessages } from "./tasks.mjs"
 import { AGREEMENT, formatDuration, renderProgress } from "./progress.mjs"
 import { rankingPath, readRanking, selectModel } from "../src/models.mjs"
 
@@ -36,7 +36,8 @@ function settings(env) {
     caller: env.OPENCODE_MCP_CALLER || "mcp",
     protocol: env.OPENCODE_MCP_PROTOCOL !== "off",
     delegateWaitMs: number("OPENCODE_MCP_DELEGATE_WAIT_MS", 20_000),
-    waitMs: number("OPENCODE_MCP_WAIT_MS", 60_000),
+    // The SDK defaults to a 60s request timeout; leave time for discovery and reporting.
+    waitMs: number("OPENCODE_MCP_WAIT_MS", 30_000),
     maxChars: number("OPENCODE_MCP_MAX_CHARS", 8_000),
   }
 }
@@ -58,10 +59,6 @@ function requireString(args, key, tool) {
   if (typeof value !== "string" || value.trim().length === 0)
     fail(tool, `parameter "${key}" is required and must be a non-empty string.`)
   return value
-}
-
-function optionalString(args, key) {
-  return typeof args?.[key] === "string" ? args[key] : undefined
 }
 
 function oneOf(value, allowed, tool, key) {
@@ -119,6 +116,15 @@ export function createTools({ api, env = process.env } = {}) {
     return `${text}\n\nStill running; call action="wait" again to keep waiting.`
   }
 
+  function finishedReport(sessionID, messages, detail, extra = {}) {
+    const state = stateFromMessages(messages)
+    const output = readOutput(messages, { maxChars: config.maxChars })
+    return {
+      text: withBody(head(sessionID, state, detail), output.text, output.truncated),
+      structured: { session_id: sessionID, state, text: output.text, truncated: output.truncated, ...extra },
+    }
+  }
+
   /* ── opencode_delegate ───────────────────────────────────────────────── */
 
   async function delegate(args = {}) {
@@ -126,7 +132,7 @@ export function createTools({ api, env = process.env } = {}) {
     rejectUnexpected(args, ["task", "directory"], tool)
     const task = requireString(args, "task", tool)
     const directory = normalizeDirectory(
-      optionalString(args, "directory") ||
+      (args.directory === undefined ? undefined : requireString(args, "directory", tool)) ||
         config.directory ||
         fail(tool, "pass directory or set OPENCODE_MCP_DIRECTORY: delegated sessions need an explicit working directory."),
     )
@@ -140,25 +146,26 @@ export function createTools({ api, env = process.env } = {}) {
       metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller },
     })
     const preamble = config.protocol ? AGREEMENT : undefined
-    await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
+    try {
+      await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
+    } catch (error) {
+      // The prompt may already be queued. Keep the handle available instead of inviting
+      // another delegation (and another execution) after a lost response.
+      throw new Error(`Session ${session.id}: ${error.message}. Check this session before sending the task again.`, { cause: error })
+    }
 
     // A short wait makes a quick task a single round-trip; anything longer becomes a
     // session to poll, which is the normal way to talk to a subagent.
     const waited = await api.wait(session.id, config.delegateWaitMs)
-    if (!waited.completed) {
-      const { state, messages } = await snapshot(session.id, false, 40)
+    const { state, messages } = await snapshot(session.id, waited.completed, 100)
+    if (state === "running" || state === "pending") {
       return {
         text: `${await runningReport(session.id, messages, state)}\n\nTip: session_id="${session.id}"`,
         structured: { session_id: session.id, state },
       }
     }
 
-    const messages = await api.messages(session.id, 100)
-    const output = readOutput(messages, { maxChars: config.maxChars })
-    return {
-      text: withBody(head(session.id, "done", `${(waited.waitedMs / 1000).toFixed(1)}s`), output.text, output.truncated),
-      structured: { session_id: session.id, state: "done", text: output.text, truncated: output.truncated },
-    }
+    return finishedReport(session.id, messages, `${(waited.waitedMs / 1000).toFixed(1)}s`)
   }
 
   /* ── opencode_session ────────────────────────────────────────────────── */
@@ -180,34 +187,21 @@ export function createTools({ api, env = process.env } = {}) {
     }
 
     if (action === "wait" || action === "message") {
-      let cursor
       if (action === "message") {
         const text = requireString(args, "text", tool)
-        // Read the boundary first so the reply is the delta, not the previous turn.
-        const before = await api.messages(sessionID, 1)
-        cursor = before[0]?.id
         await api.prompt(sessionID, text)
       }
 
       const waited = await api.wait(sessionID, config.waitMs)
-      if (!waited.completed) {
-        const { state, messages } = await snapshot(sessionID, false, 40)
+      const { state, messages } = await snapshot(sessionID, waited.completed, 100)
+      if (state === "running" || state === "pending") {
         return {
           text: await runningReport(sessionID, messages, state),
           structured: { session_id: sessionID, state, waited_ms: waited.waitedMs },
         }
       }
 
-      const messages = await api.messages(sessionID, 100)
-      const output = readOutput(messages, { cursor, maxChars: config.maxChars })
-      return {
-        text: withBody(
-          head(sessionID, "done", `waited ${(waited.waitedMs / 1000).toFixed(1)}s`),
-          output.text,
-          output.truncated,
-        ),
-        structured: { session_id: sessionID, state: "done", text: output.text, truncated: output.truncated, waited_ms: waited.waitedMs },
-      }
+      return finishedReport(sessionID, messages, `waited ${(waited.waitedMs / 1000).toFixed(1)}s`, { waited_ms: waited.waitedMs })
     }
 
     // cancel
@@ -229,7 +223,7 @@ export function createTools({ api, env = process.env } = {}) {
         type: "object",
         properties: {
           task: { type: "string", description: "The complete instruction for the agent." },
-          directory: { type: "string", description: "Working directory for the task." },
+          directory: { type: "string", description: "Existing absolute working directory for the task." },
         },
         required: ["task"],
         additionalProperties: false,

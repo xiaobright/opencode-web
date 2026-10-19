@@ -1072,6 +1072,9 @@
      .state/model-ranking.json（网页写、MCP 读），这里只负责编辑它。 */
   var modelsPanel = null
   var modelsState = { items: [], saved: "", available: false }
+  var rankingSaveQueue = Promise.resolve()
+  var rankingRevision = 0
+  var rankingPending = 0
 
   function ensureModelsPanel() {
     if (modelsPanel && modelsPanel.isConnected) return modelsPanel
@@ -1119,15 +1122,23 @@
 
   async function loadModels() {
     if (!modelsPanel) return
+    // Keep the optimistic order until its queued saves finish, including on reopen.
+    if (rankingPending) {
+      renderModels("")
+      return
+    }
+    var revision = rankingRevision
     renderModels("正在读取模型列表…")
     try {
       var response = await fetch("/__opencode-web/models", { headers: { accept: "application/json" } })
       var data = await response.json()
+      if (revision !== rankingRevision) return
       modelsState.items = Array.isArray(data.models) ? data.models : []
       modelsState.available = Boolean(data.available)
       modelsState.saved = ""
       renderModels(modelsState.available ? "" : "后台服务未运行，读不到模型列表。打开一个会话后点刷新。")
     } catch (error) {
+      if (revision !== rankingRevision) return
       modelsState.items = []
       renderModels("读取失败：" + ((error && error.message) || error))
     }
@@ -1148,18 +1159,32 @@
     void saveRanking(items)
   }
 
-  async function saveRanking(items) {
-    try {
-      var response = await fetch("/__opencode-web/models", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ranking: items.map(modelRefOf) }),
-      })
-      modelsState.saved = response.ok ? "已保存 · 下一次委派生效" : "保存失败（HTTP " + response.status + "）"
-    } catch (error) {
-      modelsState.saved = "保存失败：" + ((error && error.message) || error)
-    }
+  function saveRanking(items) {
+    var revision = ++rankingRevision
+    var ranking = items.map(modelRefOf)
+    rankingPending++
+    modelsState.saved = "正在保存…"
     renderModels("")
+    // Only one POST is in flight. An older order cannot arrive after a newer one.
+    rankingSaveQueue = rankingSaveQueue.then(async function () {
+      var notice
+      try {
+        var response = await fetch("/__opencode-web/models", {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({ ranking: ranking }),
+        })
+        notice = response.ok ? "已保存 · 下一次委派生效" : "保存失败（HTTP " + response.status + "）"
+      } catch (error) {
+        notice = "保存失败：" + ((error && error.message) || error)
+      }
+      rankingPending--
+      if (revision === rankingRevision) {
+        modelsState.saved = notice
+        renderModels("")
+      }
+    })
+    return rankingSaveQueue
   }
 
   function renderModels(notice) {

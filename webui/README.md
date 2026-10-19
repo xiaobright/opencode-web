@@ -76,7 +76,7 @@
 
 ## 模型顺序
 
-切到后台栏位后，侧栏头部的叠层按钮（或 `?ocw=models`）打开免费模型排序页：列出 `/api/model` 里免费、已启用、支持工具的模型，上下移动调整顺序，排第一的就是下一次 MCP 委派用的模型。顺序经网关的 `GET/POST /__opencode-web/models` 读写 `.state/model-ranking.json`（POST 带同源校验），MCP 读同一个文件（`src/models.mjs`），所以页面和委派结果始终一致；还没排过时 DeepSeek V4.1 Flash 排第一。刷新按钮重新拉取目录，服务休眠时给出提示而不是空列表。
+切到后台栏位后，侧栏头部的叠层按钮（或 `?ocw=models`）打开免费模型排序页：列出 `/api/model` 里免费、已启用、支持工具的模型，上下移动调整顺序。连续调整会按操作顺序保存，显示「已保存」后，排第一的就是下一次 MCP 委派用的模型。顺序经网关的 `GET/POST /__opencode-web/models` 读写 `.state/model-ranking.json`（POST 带同源校验），MCP 读同一个文件（`src/models.mjs`）；还没排过时 DeepSeek V4.1 Flash 排第一。刷新按钮重新拉取目录，保存中保留当前顺序，服务休眠时给出提示而不是空列表。
 
 本地验证：在 `tests/activity` 目录运行 `bun test ./model.test.mjs` 和 `bun run run.mjs`。浏览器检查使用已保留的 2.0.30 静态资源快照与官方事件夹具，独立端口 53128；不启动后台或调用真实模型。状态流的原字节、错误和取消继续传给官方客户端。首批消息兼容 `response.json()` 和 `response.text()`：当前 SDK 使用后者，因此会额外解析一次这批 JSON，读取元数据后立即释放，不再读取或复制响应流。
 

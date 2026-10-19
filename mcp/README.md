@@ -24,9 +24,11 @@
 - `directory` 必须是已存在的绝对路径；不传就用 `OPENCODE_MCP_DIRECTORY`，两者都没有会直接报错——**没有隐式 cwd**，会话不会落到意料之外的项目。
 - 会话级预授权（工具全放行），无人值守不会卡在审批上。
 - `opencode_delegate` 先等 20 秒：够快的一次调用就拿到答案；更久的会返回 `session_id`，后续用 `wait` 续等。
-- `wait` 每次最多等 60 秒；超时只表示等待预算用完，会话继续跑，再调一次即可。
-- `message` 往同一个会话追加指令并等回复（默认 60 秒），只返回这一问的增量。
+- `wait` 默认每次等 30 秒，为 MCP 客户端常见的 60 秒请求超时留出状态查询和传输余量；等待预算用完时会话继续跑，再调一次即可。调大服务端等待预算前，也需相应调大客户端请求超时。
+- `message` 往同一个会话追加指令并等回复（默认 30 秒），只返回这一问的增量；超时后通过 `wait` 续等或 MCP 重连，也从持久消息恢复这一轮的输出边界。
 - `cancel` 只中断当前回合，会话和文件都保留。
+- 已结束的回合按后台结果返回 `done` / `failed` / `cancelled`，等待结束不等于执行成功。
+- 连接丢失时，只有查询和只读等待自动重试；创建会话、发送指令、取消都不自动重发。写请求报错时可能已被后台接受，应先检查会话，避免重复提交。
 
 ## 工作协议（让 status 有东西可抓）
 
@@ -77,7 +79,7 @@ Files: 2 changed +31 −4 (a.js, b.js)
 | `OPENCODE_MCP_MODEL` | 强制钉死模型，优先于网页排序；默认留空 |
 | `OPENCODE_WEB_STATE_DIR` | 状态目录（排序文件），默认仓库下 `.state/`；网页网关与 MCP 共用 |
 | `OPENCODE_MCP_DELEGATE_WAIT_MS` | 派活后先等多久，默认 20000 |
-| `OPENCODE_MCP_WAIT_MS` | 单次 `wait` / `message` 的等待预算，默认 60000 |
+| `OPENCODE_MCP_WAIT_MS` | 单次 `wait` / `message` 的等待预算，默认 30000；调大时需给客户端请求超时留出余量 |
 | `OPENCODE_MCP_MAX_CHARS` | 单次返回正文上限，默认 8000 |
 | `OPENCODE_MCP_PROTOCOL` | 设为 `off` 关掉 plan/progress 工作协议 |
 | `OPENCODE_BIN` | 透传给服务发现层，指定 opencode 可执行文件 |
@@ -88,8 +90,9 @@ Files: 2 changed +31 −4 (a.js, b.js)
 cd mcp && npm install && bun test ./tests
 ```
 
-- `tests/tools.test.mjs`：假 opencode 服务覆盖派活、运行中续等、状态、续聊、取消、模型排序/钉死/回落、目录必填、参数隔离（`model`/`caller`/`mode`/`task_id` 都会被拒绝）、输出截断。
-- `tests/server.test.mjs`：官方 SDK 客户端通过 stdio 启动真实 server，验证 `tools/list` 只有两个工具、`tools/call` 全链路（`XDG_STATE_HOME` 指向夹具，不碰真实服务）。
+- `tests/tools.test.mjs` / `tests/tasks.test.mjs`：假 opencode 服务覆盖派活、续等、失败/取消结果、续聊超时后的输出边界、模型排序/钉死/回落、绝对目录校验、参数隔离、输出截断。
+- `tests/client.test.mjs`：真实 Node HTTP 客户端验证丢失响应后的重试策略，确保已接收的写请求不被重复提交。
+- `tests/server.test.mjs`：官方 SDK 客户端通过 Node stdio 启动真实 server，验证两个工具、默认 30 秒续等及 MCP 进程重连（`XDG_STATE_HOME` 指向夹具，不碰真实服务）；整组测试约需 35 秒。
 
 ## 边界
 

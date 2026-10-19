@@ -42,13 +42,24 @@ export const DEFAULT_MODELS = [
   },
 ]
 
-export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, models = DEFAULT_MODELS, progressMode = false, diffFiles = [] } = {}) {
+export async function startFixture({ replies = ["PONG."], outcomes = ["succeeded"], replyDelayMs = 5, models = DEFAULT_MODELS, progressMode = false, diffFiles = [], dropResponses = {} } = {}) {
   const sessions = new Map()
-  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, promptTexts: [], deliveries: [] }
+  const state = { waits: 0, prompts: 0, interrupts: 0, created: 0, messageReads: 0, promptTexts: [], deliveries: [] }
   const waiters = new Map()
+  const timers = new Map()
+  const drops = { ...dropResponses }
+
+  function drop(kind, request) {
+    if (!(drops[kind] > 0)) return false
+    drops[kind]--
+    request.socket.destroy()
+    return true
+  }
 
   function settle(session, outcome) {
     if (!session.running) return
+    clearTimeout(timers.get(session.id))
+    timers.delete(session.id)
     session.running = false
     const now = Date.now()
     if (outcome === "succeeded") {
@@ -110,6 +121,7 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
         }
         sessions.set(created.id, created)
         state.created++
+        if (drop("create", request)) return
         json(200, { data: created })
       })
       return
@@ -141,7 +153,9 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
             ],
           })
         }
-        setTimeout(() => settle(session, "succeeded"), replyDelayMs)
+        const outcome = outcomes[Math.min(session.turns - 1, outcomes.length - 1)]
+        timers.set(session.id, setTimeout(() => settle(session, outcome), replyDelayMs))
+        if (drop("prompt", request)) return
         json(200, { data: { id: "inbox" } })
       })
       return
@@ -149,6 +163,7 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
 
     if (request.method === "POST" && url.pathname === `/api/experimental/session/${session.id}/wait`) {
       state.waits++
+      if (drop("wait", request)) return
       if (!session.running) return json(204)
       const pending = waiters.get(session.id) ?? []
       pending.push(() => {
@@ -168,6 +183,8 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
     if (request.method === "GET" && url.pathname.endsWith("/diff")) return json(200, { data: diffFiles })
 
     if (request.method === "GET" && url.pathname.endsWith("/message")) {
+      state.messageReads++
+      if (drop("messages", request)) return
       const limit = Number(url.searchParams.get("limit") ?? 20)
       return json(200, { data: [...session.messages].reverse().slice(0, limit), cursor: {} })
     }
@@ -184,7 +201,13 @@ export async function startFixture({ replies = ["PONG."], replyDelayMs = 5, mode
     url,
     state,
     sessions,
-    close: () => new Promise((done) => { server.closeAllConnections(); server.close(done) }),
+    finish: (sessionID, outcome = "succeeded") => settle(sessions.get(sessionID), outcome),
+    close: () => new Promise((done) => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+      server.closeAllConnections()
+      server.close(done)
+    }),
   }
 }
 
