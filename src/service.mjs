@@ -11,6 +11,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const PROBE_TIMEOUT_MS = 5_000
+const PROBE_RETRY_DELAY_MS = 250
 const START_TIMEOUT_MS = 60_000
 const POLL_INTERVAL_MS = 500
 
@@ -80,6 +81,13 @@ export async function discover() {
 export async function resolve({ onStart } = {}) {
   const found = await discover()
   if (found) return found
+
+  // One failed probe is not proof that the service is down: a busy or restarting process
+  // can refuse a single connection, and starting a second instance because of that is far
+  // worse than waiting a moment. Retry once before falling back to the CLI.
+  await new Promise((done) => setTimeout(done, PROBE_RETRY_DELAY_MS))
+  const retried = await discover()
+  if (retried) return retried
 
   onStart?.()
   await run([cliPath(), "service", "start"])
