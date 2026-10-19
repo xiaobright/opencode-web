@@ -124,6 +124,7 @@
     up: '<path d="m6 14.5 6-6.5 6 6.5"/>',
     down: '<path d="m6 9.5 6 6.5 6-6.5"/>',
     refresh: '<path d="M19.6 12a7.6 7.6 0 1 1-2.3-5.4"/><path d="M19.6 4.6V10H14"/>',
+    rows: '<path d="M4 6h.01M4 12h.01M4 18h.01M8.5 6H20M8.5 12H20M8.5 18H20"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
   }
 
@@ -151,6 +152,7 @@
     groups: [],
     background: [],
     activeIds: new Set(),
+    scope: "foreground",
     loaded: false,
     loading: false,
     error: "",
@@ -163,7 +165,6 @@
   // MCP 委派的会话在创建时写入 metadata.origin（见 mcp/tools.mjs）。侧栏据此把
   // 后台任务从工作区分组里摘出来单独放，不让它们散落在各项目下面。
   var BACKGROUND_ORIGIN = "opencode-delegate"
-  var BACKGROUND_GROUP = "__background"
 
   function isBackground(session) {
     return Boolean(session && session.metadata && session.metadata.origin === BACKGROUND_ORIGIN)
@@ -180,17 +181,15 @@
     var top = el("div", "ocw-rail-group")
     var bottom = el("div", "ocw-rail-group ocw-rail-bottom")
 
-    // 顶部这一颗是「新聊天」：点它进官方的草稿屏（居中品牌标 + 完整 composer），
-    // 会话要到真正发送时才落库。官方那个首页（/）不再从这里进。
-    top.appendChild(railButton("compose", "新聊天", "newchat", function () { openDraft("") }))
+    // 顶部三颗是导航本身：折叠、前台任务、后台任务。新聊天留在侧栏里，
+    // 搜索进各自栏位，模型顺序是后台任务的一部分（见侧栏头部）。
     top.appendChild(railButton("panel", "折叠 / 展开侧栏", "panel", toggleSidebar))
-    top.appendChild(railButton("search", "搜索会话", "search", openSearch))
-    var backgroundButton = railButton("pulse", "后台任务监视", "background", openMonitor)
+    top.appendChild(railButton("rows", "前台任务", "foreground", function () { setScope("foreground") }))
+    var backgroundButton = railButton("pulse", "后台任务", "background", function () { setScope("background") })
     var backgroundBadge = el("span", "ocw-rail-badge")
     backgroundBadge.hidden = true
     backgroundButton.appendChild(backgroundBadge)
     top.appendChild(backgroundButton)
-    top.appendChild(railButton("layers", "模型顺序", "models", openModels))
     bottom.appendChild(railButton("sun", "切换明暗主题", "theme", toggleTheme))
     bottom.appendChild(railButton("settings", "设置", "settings", function () { go("/settings") }))
 
@@ -204,7 +203,11 @@
     var title = el("span", "ocw-sidebar-title")
     title.textContent = "opencode"
     var headActions = el("div", "ocw-sidebar-actions")
-    headActions.appendChild(iconButton("search", "搜索会话", openSearch))
+    // 模型顺序只在后台任务栏位里有意义：它是 MCP 委派用哪个模型的决定项。
+    var modelsButton = iconButton("layers", "模型顺序", openModels)
+    modelsButton.hidden = true
+    headActions.appendChild(modelsButton)
+    headActions.appendChild(iconButton("search", "搜索", openSearch))
     head.appendChild(title)
     head.appendChild(headActions)
 
@@ -212,6 +215,7 @@
     newChat.type = "button"
     newChat.innerHTML = icon("compose", 17) + "<span>新聊天</span>"
     newChat.addEventListener("click", function () {
+      if (state.scope !== "foreground") setScope("foreground")
       openDraft("")
     })
 
@@ -236,7 +240,15 @@
     root.appendChild(sidebar)
     ;(document.body || document.documentElement).appendChild(root)
 
-    ui = { root: root, rail: rail, list: list, filter: filter, newChat: newChat }
+    ui = {
+      root: root,
+      rail: rail,
+      list: list,
+      filter: filter,
+      newChat: newChat,
+      title: title,
+      modelsButton: modelsButton,
+    }
     setGutter()
     return ui
   }
@@ -396,6 +408,7 @@
   function forwardHomeOnce() {
     if (forwardedHome) return
     if (!state.loaded || !state.groups.length) return
+    if (state.scope === "background") return
     if (location.pathname !== "/") return
     forwardedHome = true
     openDraft("")
@@ -601,6 +614,34 @@
     return match ? match[1] : ""
   }
 
+  /* ── 两个栏位：前台任务 / 后台任务 ────────────────────────────────────
+     切换是整页语义：侧栏换成对应列表，右侧换成对应视图。后台视图不会
+     盖住导航——任何一次真正的会话跳转都先回到前台。 */
+  function setScope(scope) {
+    var next = scope === "background" ? "background" : "foreground"
+    if (state.scope === next) {
+      if (next === "background") openMonitor()
+      return
+    }
+    state.scope = next
+    state.scopeSince = Date.now()
+    document.documentElement.setAttribute("data-ocw-scope", next)
+    ui.title.textContent = next === "background" ? "后台任务" : "opencode"
+    ui.modelsButton.hidden = next !== "background"
+    ui.newChat.hidden = next === "background"
+    ui.filter.placeholder = next === "background" ? "搜索后台任务…" : "搜索会话…"
+    ui.filter.hidden = true
+    ui.filter.value = ""
+    setRailActive("foreground", next === "foreground")
+    setRailActive("background", next === "background")
+    if (next === "background") openMonitor()
+    else {
+      closeMonitor()
+      closeModels()
+    }
+    renderList("")
+  }
+
   function renderList(filterText) {
     var list = ui.list
     list.textContent = ""
@@ -610,20 +651,19 @@
       return
     }
 
-    if (!state.groups.length && !state.background.length) {
+    var activeId = currentSessionId()
+
+    if (state.scope === "background") {
+      renderBackgroundLane(list, filterText, activeId)
+      return
+    }
+
+    if (!state.groups.length) {
       list.appendChild(message(state.error ? "列表读取失败：" + state.error : "还没有会话"))
       return
     }
 
-    var activeId = currentSessionId()
     var shown = 0
-
-    // 后台任务固定排在最上面：它们不属于任何工作区，也不该散落在工作区分组里。
-    var background = backgroundSection(activeId, filterText)
-    if (background) {
-      list.appendChild(background)
-      shown += state.background.length
-    }
 
     for (var i = 0; i < state.groups.length; i++) {
       var item = state.groups[i]
@@ -699,8 +739,8 @@
     syncBusy()
   }
 
-  /* 后台任务这一组：MCP 委派出去的会话，按调用方/模型标注，运行中复用行左侧的像素格。 */
-  function backgroundSection(activeId, filterText) {
+  /* 后台任务栏位：MCP 委派出去的会话，按调用方/模型标注，运行中复用行左侧的像素格。 */
+  function renderBackgroundLane(list, filterText, activeId) {
     var sessions = state.background
     if (filterText) {
       var needle = String(filterText).toLowerCase()
@@ -708,50 +748,14 @@
         return String(session.title || "").toLowerCase().indexOf(needle) !== -1
       })
     }
-    if (!sessions.length) return null
 
-    var isCollapsed = !filterText && collapsedGroups.has(BACKGROUND_GROUP)
-    var hasActive = sessions.some(function (session) {
-      return session.id === activeId
-    })
-
-    var section = el("section", "ocw-group is-background")
-    if (isCollapsed) section.classList.add("is-collapsed")
-    if (hasActive) section.classList.add("has-active")
-
-    var row = el("div", "ocw-group-row")
-    var head = el("button", "ocw-group-head")
-    head.type = "button"
-    head.title = "MCP 委派的后台任务（metadata.origin = " + BACKGROUND_ORIGIN + "）"
-    head.innerHTML =
-      '<span class="ocw-caret">' + icon("chevron", 13) + "</span>" +
-      '<span class="ocw-group-icon">' + icon("pulse", 15) + "</span>" +
-      '<span class="ocw-group-name"></span>' +
-      '<span class="ocw-group-count"></span>'
-    head.querySelector(".ocw-group-name").textContent = "后台任务"
-    head.querySelector(".ocw-group-count").textContent = String(sessions.length)
-    head.addEventListener("click", function () {
-      if (collapsedGroups.has(BACKGROUND_GROUP)) collapsedGroups.delete(BACKGROUND_GROUP)
-      else collapsedGroups.add(BACKGROUND_GROUP)
-      renderList(query())
-    })
-
-    // 和「在某个工作区新建会话」同一个位置：这里放打开监视页的入口。
-    var monitorButton = el("button", "ocw-group-new", icon("pulse", 14))
-    monitorButton.type = "button"
-    monitorButton.title = "打开后台任务监视页"
-    monitorButton.setAttribute("aria-label", monitorButton.title)
-    monitorButton.addEventListener("click", openMonitor)
-
-    row.appendChild(head)
-    row.appendChild(monitorButton)
-    section.appendChild(row)
-
-    if (!isCollapsed) {
-      for (var i = 0; i < sessions.length; i++) section.appendChild(sessionRow(sessions[i], activeId, { background: true }))
+    if (!sessions.length) {
+      list.appendChild(message(filterText ? "没有匹配的后台任务" : "还没有后台任务。用 MCP 委派后，这里会按会话列出。"))
+      return
     }
 
-    return section
+    for (var i = 0; i < sessions.length; i++) list.appendChild(sessionRow(sessions[i], activeId, { background: true }))
+    syncBusy()
   }
 
   function moreRow(groupId, remaining) {
@@ -803,6 +807,8 @@
     row.title = details.join("\n")
 
     row.addEventListener("click", function () {
+      // 打开会话永远回到前台：后台视图不留在右边。
+      if (state.scope !== "foreground") setScope("foreground")
       go("/server/" + keySegment() + "/session/" + session.id)
     })
 
@@ -904,7 +910,9 @@
       "</header>" +
       '<div class="ocw-panel-sub"></div>' +
       '<div class="ocw-panel-body"><div class="ocw-panel-list"></div></div>'
-    panel.querySelector("[data-monitor-close]").addEventListener("click", closeMonitor)
+    panel.querySelector("[data-monitor-close]").addEventListener("click", function () {
+      setScope("foreground")
+    })
     ;(document.body || document.documentElement).appendChild(panel)
     monitor = panel
     return panel
@@ -1052,7 +1060,8 @@
     card.appendChild(directory)
     card.appendChild(foot)
     card.addEventListener("click", function () {
-      closeMonitor()
+      // 点卡片就是进入那个会话：回前台，别让后台视图留在右边。
+      setScope("foreground")
       go(sessionUrl(session.id))
     })
     return card
@@ -1227,7 +1236,8 @@
     // 会话路由是最可靠的「当前工作区」来源；草稿屏期间保留上一次记下的那个
     var dir = routeDirectory()
     if (dir) state.workspace = dir
-    setRailActive("newchat", onDraft)
+    setRailActive("foreground", state.scope === "foreground")
+    setRailActive("background", state.scope === "background")
     setRailActive("settings", location.pathname === "/settings")
     syncThemeIcon()
     syncHero()
@@ -1248,6 +1258,7 @@
     }
 
     build()
+    document.documentElement.setAttribute("data-ocw-scope", "foreground")
     void refresh()
 
     // 托盘菜单用 ?ocw=background 打开监视页；模型顺序用 ?ocw=models。打开后把参数摘掉。
@@ -1258,14 +1269,21 @@
       } catch (error) {
         void error
       }
-      if (panel === "background") openMonitor()
-      if (panel === "models") openModels()
+      if (panel === "background") setScope("background")
+      if (panel === "models") {
+        setScope("background")
+        openModels()
+      }
     }
 
     document.addEventListener("keydown", function (event) {
       if (event.key !== "Escape") return
-      if (monitor && !monitor.hidden) closeMonitor()
-      if (modelsPanel && !modelsPanel.hidden) closeModels()
+      if (modelsPanel && !modelsPanel.hidden) {
+        closeModels()
+        if (state.scope === "background") openMonitor()
+        return
+      }
+      if (state.scope === "background") setScope("foreground")
     })
 
     // 活动状态推送一来就点灯/熄灯（activity-model.js 按文件名顺序先于本脚本加载）
@@ -1286,6 +1304,8 @@
     setInterval(function () {
       if (location.pathname !== lastPath) {
         lastPath = location.pathname
+        // 后台视图打开期间发生的真实跳转（官方快捷键、标签）也回前台，别把导航盖住。
+        if (state.scope === "background" && Date.now() - (state.scopeSince || 0) > 1200) setScope("foreground")
         void refresh()
       }
       syncActive()

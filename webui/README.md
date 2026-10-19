@@ -67,15 +67,16 @@
 
 ## 后台任务（MCP 委派）
 
-`codex-shell.js` 按会话的 `metadata.origin === "opencode-delegate"` 分流：这类会话不进工作区分组，统一排在最上面的「后台任务」组，行左侧复用像素格动画、副标题显示 `caller · model`。图标栏的心跳按钮带运行数角标；点它、或点分组上的监视按钮、或从托盘菜单进来（URL 带 `?ocw=background`）会打开监视页。
+图标栏只有三颗导航：**折叠 / 前台任务 / 后台任务**。新聊天留在侧栏里，搜索进各自栏位，模型顺序是后台任务的一部分（切到后台栏位后出现在侧栏头部）。
 
-监视页是覆盖右侧内容区的只读面板（层级 42，低于官方弹层），每 2.5 秒读一次 `/api/session`、`/api/session/active` 和各会话最近 8 条消息：显示标题、调用方、模型、目录、最近一轮工具流程（`shell → edit`）、token/成本、完成状态，点卡片直接进会话，Esc 关闭。运行状态优先取 `/api/session/active`（权威），事件流负责即时熄灯——`activity-model.js` 的 `known()` 让「刚跑完」不必等下一次列表刷新。
+- **前台任务**：侧栏是工作区分组（含「新聊天」和搜索），右侧是官方界面。
+- **后台任务**：侧栏换成 MCP 委派的会话列表（带自己的搜索框和空态），右侧是监视页。点任一后台任务、点新聊天、或发生真实跳转（快捷键/官方标签）都会回到前台——后台视图不会盖住导航。
 
-判定完全依赖 metadata，不需要额外登记表；TUI 自己开的会话不会被误判。要恢复成不分组，删掉 `codex-shell.js` 里 `BACKGROUND_ORIGIN` 相关的分流即可。
+判定依据是会话的 `metadata.origin === "opencode-delegate"`，不需要登记表；TUI 自己开的会话不会被误判。监视页每 2.5 秒读一次 `/api/session`、`/api/session/active` 和各会话最近 8 条消息：显示标题、调用方、模型、目录、最近一轮工具流程（`shell → edit`）、token/成本、完成状态，点卡片直接进会话，Esc 关闭。运行状态优先取 `/api/session/active`（权威），事件流负责即时熄灯——`activity-model.js` 的 `known()` 让「刚跑完」不必等下一次列表刷新。
 
 ## 模型顺序
 
-图标栏的叠层按钮（`?ocw=models`）打开免费模型排序页：列出 `/api/model` 里免费、已启用、支持工具的模型，上下移动调整顺序，排第一的就是下一次 MCP 委派用的模型。顺序经网关的 `GET/POST /__opencode-web/models` 读写 `.state/model-ranking.json`（POST 带同源校验），MCP 读同一个文件（`src/models.mjs`），所以页面和委派结果始终一致；还没排过时 DeepSeek V4.1 Flash 排第一。刷新按钮重新拉取目录，服务休眠时给出提示而不是空列表。
+切到后台栏位后，侧栏头部的叠层按钮（或 `?ocw=models`）打开免费模型排序页：列出 `/api/model` 里免费、已启用、支持工具的模型，上下移动调整顺序，排第一的就是下一次 MCP 委派用的模型。顺序经网关的 `GET/POST /__opencode-web/models` 读写 `.state/model-ranking.json`（POST 带同源校验），MCP 读同一个文件（`src/models.mjs`），所以页面和委派结果始终一致；还没排过时 DeepSeek V4.1 Flash 排第一。刷新按钮重新拉取目录，服务休眠时给出提示而不是空列表。
 
 本地验证：在 `tests/activity` 目录运行 `bun test ./model.test.mjs` 和 `bun run run.mjs`。浏览器检查使用已保留的 2.0.30 静态资源快照与官方事件夹具，独立端口 53128；不启动后台或调用真实模型。状态流的原字节、错误和取消继续传给官方客户端。首批消息兼容 `response.json()` 和 `response.text()`：当前 SDK 使用后者，因此会额外解析一次这批 JSON，读取元数据后立即释放，不再读取或复制响应流。
 

@@ -606,24 +606,6 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   color: var(--v2-text-text-muted);
 }
 
-.ocw-group.is-background {
-  margin-bottom: 4px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--v2-border-border-base);
-}
-
-.ocw-group-count {
-  flex: none;
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--v2-background-bg-layer-03);
-  color: var(--v2-text-text-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 .ocw-rail-btn {
   position: relative;
 }
@@ -929,4 +911,9 @@ html[data-ocw-drafting] [data-slot="session-chat-panel"] {
   padding: 8px 24px 12px;
   color: var(--v2-text-text-faint);
   font-size: 12px;
+}
+
+/* 栏位切换：隐藏用 hidden 属性，别让 display:flex 把它顶掉 */
+.ocw [hidden] {
+  display: none !important;
 }
