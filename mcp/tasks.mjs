@@ -8,7 +8,8 @@ import { stripProtocol } from "./progress.mjs"
 
 export function deriveTitle(task) {
   const first = String(task ?? "").trim().split(/\r?\n/).find((line) => line.trim().length > 0) ?? "delegated task"
-  const plain = first.replace(/^[#>*\-\s]+/, "").replace(/[`*_]/g, "").trim()
+  // Strip markdown emphasis, but keep underscores: they belong to code identifiers.
+  const plain = first.replace(/^[#>*\-\s]+/, "").replace(/[`*]/g, "").trim()
   return plain.length > 64 ? `${plain.slice(0, 63)}…` : plain || "delegated task"
 }
 

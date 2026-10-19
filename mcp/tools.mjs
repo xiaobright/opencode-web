@@ -8,12 +8,12 @@
 // a caller has no way to know which free model is good today, and does not need to.
 //
 // Delegated sessions get a working agreement: a plan line, then one progress line per
-// step. That is what status/wait report back, and what the reminder nudges when the
-// agent goes quiet. opencode V2 removed the todo tool, so the protocol is plain text.
+// step. It rides in the task message because MCP cannot inject a system prompt, and it
+// is what status/wait report back. opencode V2 removed the todo tool, so it is text.
 
 import { normalizeDirectory } from "./opencode.mjs"
 import { deriveTitle, formatAge, lastAssistantText, readOutput, stateFromMessages } from "./tasks.mjs"
-import { AGREEMENT, PLAN_AGREEMENT, REMINDER, formatDuration, isSilent, renderProgress } from "./progress.mjs"
+import { AGREEMENT, formatDuration, renderProgress } from "./progress.mjs"
 import { rankingPath, readRanking, selectModel } from "../src/models.mjs"
 
 // Sessions created here carry this metadata origin, which is how the web UI and the tray
@@ -38,8 +38,6 @@ function settings(env) {
     delegateWaitMs: number("OPENCODE_MCP_DELEGATE_WAIT_MS", 20_000),
     waitMs: number("OPENCODE_MCP_WAIT_MS", 60_000),
     maxChars: number("OPENCODE_MCP_MAX_CHARS", 8_000),
-    silentMs: number("OPENCODE_MCP_SILENT_MS", 60_000),
-    nudgeMs: number("OPENCODE_MCP_NUDGE_MS", 90_000),
   }
 }
 
@@ -84,7 +82,6 @@ function withBody(line, text, truncated) {
 
 export function createTools({ api, env = process.env } = {}) {
   const config = settings(env)
-  const nudges = new Map()
 
   // The model is an operator decision: OPENCODE_MCP_MODEL pins one, otherwise the web
   // UI's ranking decides, otherwise the first free tool-capable model in the catalog.
@@ -117,38 +114,17 @@ export function createTools({ api, env = process.env } = {}) {
     return [head(sessionID, state, elapsed === undefined ? undefined : formatDuration(elapsed)), block].filter(Boolean).join("\n")
   }
 
-  /**
-   * The only channel a subagent can reach the caller through is the tool result the
-   * caller is blocked on, so a reminder is a mid-run steer: it lands at the next step
-   * boundary, never as an extra turn. Rate limited per session.
-   */
-  async function nudgeIfSilent(sessionID, state, messages) {
-    if (!config.protocol || state !== "running") return false
-    if (!isSilent({ messages, thresholdMs: config.silentMs })) return false
-    const last = nudges.get(sessionID) ?? 0
-    if (Date.now() - last < config.nudgeMs) return false
-    nudges.set(sessionID, Date.now())
-    try {
-      await api.prompt(sessionID, REMINDER, { delivery: "steer" })
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function runningReport(sessionID, messages, state, nudged) {
+  async function runningReport(sessionID, messages, state) {
     const text = await progressText(sessionID, state, messages)
-    return `${text}\n\nStill running${nudged ? " (progress reminder sent)" : ""}; call action="wait" again to keep waiting.`
+    return `${text}\n\nStill running; call action="wait" again to keep waiting.`
   }
 
   /* ── opencode_delegate ───────────────────────────────────────────────── */
 
   async function delegate(args = {}) {
     const tool = "opencode_delegate"
-    rejectUnexpected(args, ["task", "directory", "plan"], tool)
+    rejectUnexpected(args, ["task", "directory"], tool)
     const task = requireString(args, "task", tool)
-    if (args.plan !== undefined && typeof args.plan !== "boolean") fail(tool, "parameter \"plan\" must be a boolean.")
-    const plan = args.plan === true
     const directory = normalizeDirectory(
       optionalString(args, "directory") ||
         config.directory ||
@@ -161,31 +137,18 @@ export function createTools({ api, env = process.env } = {}) {
       directory,
       model,
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
-      metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller, ...(plan ? { plan: true } : {}) },
+      metadata: { origin: BACKGROUND_ORIGIN, caller: config.caller },
     })
-    const preamble = config.protocol ? (plan ? PLAN_AGREEMENT : AGREEMENT) : undefined
+    const preamble = config.protocol ? AGREEMENT : undefined
     await api.prompt(session.id, preamble ? `${preamble}\n\n---\n\n${task}` : task)
 
     // A short wait makes a quick task a single round-trip; anything longer becomes a
     // session to poll, which is the normal way to talk to a subagent.
     const waited = await api.wait(session.id, config.delegateWaitMs)
-    if (plan && waited.completed) {
-      const messages = await api.messages(session.id, 100)
-      return {
-        text: [
-          head(session.id, "planned", `${(waited.waitedMs / 1000).toFixed(1)}s`),
-          lastAssistantText(messages) || "(no plan returned)",
-          `Approve: opencode_session action="message" session_id="${session.id}" text="approved, go ahead"`,
-          "Adjust: send the corrected steps the same way, or action=\"cancel\" to drop it.",
-        ].join("\n\n"),
-        structured: { session_id: session.id, state: "planned", plan: true },
-      }
-    }
     if (!waited.completed) {
       const { state, messages } = await snapshot(session.id, false, 40)
-      const nudged = await nudgeIfSilent(session.id, state, messages)
       return {
-        text: `${await runningReport(session.id, messages, state, nudged)}\n\nTip: session_id="${session.id}"`,
+        text: `${await runningReport(session.id, messages, state)}\n\nTip: session_id="${session.id}"`,
         structured: { session_id: session.id, state },
       }
     }
@@ -229,9 +192,8 @@ export function createTools({ api, env = process.env } = {}) {
       const waited = await api.wait(sessionID, config.waitMs)
       if (!waited.completed) {
         const { state, messages } = await snapshot(sessionID, false, 40)
-        const nudged = await nudgeIfSilent(sessionID, state, messages)
         return {
-          text: await runningReport(sessionID, messages, state, nudged),
+          text: await runningReport(sessionID, messages, state),
           structured: { session_id: sessionID, state, waited_ms: waited.waitedMs },
         }
       }
@@ -268,7 +230,6 @@ export function createTools({ api, env = process.env } = {}) {
         properties: {
           task: { type: "string", description: "The complete instruction for the agent." },
           directory: { type: "string", description: "Working directory for the task." },
-          plan: { type: "boolean", description: "Plan first: return a plan and wait for your approval before doing the work." },
         },
         required: ["task"],
         additionalProperties: false,

@@ -3,6 +3,7 @@
 // opencode V2 removed the todowrite tool (see REMOVED_TOOLS in the v1 migration), so
 // requiring a todo list would send the agent hunting for a tool that does not exist.
 // The durable protocol is text: a one-line plan, then one `progress:` line per step.
+// MCP cannot inject a system prompt, so the requirement rides in the task message.
 // When a todo tool does exist, the agent mirrors the plan there as well.
 
 export const AGREEMENT = [
@@ -14,14 +15,7 @@ export const AGREEMENT = [
   "- Keep the final answer short and skip restating this protocol.",
 ].join("\n")
 
-export const REMINDER = [
-  "[reminder] You have not reported progress for a while.",
-  "Before your next tool call, stop and write one plain-text line: `progress: n/N <what changed> -> <next>`.",
-  "If you have not written a `plan:` line yet, write it now too. If you have a todo list, update it. Do not restate anything else.",
-].join("\n")
-
 const PLAN_LINE = /(?:^|\n)\s*(?:\*\*)?plan(?:\*\*)?\s*[:：]\s*(.+)/i
-const PROGRESS_LINE = /(?:^|\n)\s*(?:\*\*)?progress(?:\*\*)?\s*[:：]\s*(.+)/i
 const PROGRESS_ANY = /(?:^|\n)\s*(?:\*\*)?(?:progress|进度)(?:\*\*)?\s*[:：]\s*(.+)/i
 
 function textOf(message) {
@@ -147,22 +141,6 @@ export function formatDuration(ms) {
   return `${Math.floor(minutes / 60)}h${minutes % 60 ? `${minutes % 60}m` : ""}`
 }
 
-/** True when the agent has not produced any assistant message for a while. */
-export function isSilent({ messages, now = Date.now(), thresholdMs = 60_000 }) {
-  const newest = newTime(messages)
-  return newest === undefined || now - newest >= thresholdMs
-}
-
-function newTime(messages) {
-  for (const message of messages ?? []) {
-    if (message.type !== "assistant") continue
-    const time = message.time ?? {}
-    const stamp = time.completed ?? time.streamed ?? time.created
-    if (typeof stamp === "number") return stamp
-  }
-  return undefined
-}
-
 /** Remove the protocol lines from a final answer: they belong to status, not to the reply. */
 export function stripProtocol(text) {
   return String(text ?? "")
@@ -172,13 +150,3 @@ export function stripProtocol(text) {
     .replace(/\n{3,}/g, "\n\n")
     .trim()
 }
-
-/** Plan mode: produce a plan, stop, wait for approval; then execute with the usual progress lines. */
-export const PLAN_AGREEMENT = [
-  "[Delegation protocol — plan mode]",
-  "- Do not call tools and do not start the work yet.",
-  "- Reply with one plan line `plan: 1) ... 2) ...` (at most 6 steps) and one short sentence on assumptions or risks.",
-  "- Then stop and wait for approval. Do not ask anything else.",
-  "- After approval: execute one step at a time, and before each next step write one plain-text line: `progress: n/N <what changed> -> <next>`.",
-  "- Keep the final answer short and skip restating this protocol.",
-].join("\n")

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { currentTool, isSilent, parsePlan, parseProgress, parseTodos, renderProgress } from "../progress.mjs"
+import { currentTool, parsePlan, parseProgress, parseTodos, renderProgress } from "../progress.mjs"
 
 const assistant = (text, { id = "msg_1", created = Date.now(), tool } = {}) => ({
   id,
@@ -51,11 +51,4 @@ test("the running tool is summarized, and only while the session is running", ()
   // A finished session must not claim work is in flight.
   const done = renderProgress({ messages, files: undefined, state: "done" })
   expect(done).not.toContain("Now:")
-})
-
-test("silence is measured from the newest assistant message", () => {
-  const now = 1_000_000
-  expect(isSilent({ messages: [], now, thresholdMs: 60_000 })).toBe(true)
-  expect(isSilent({ messages: [assistant("hi", { created: now - 90_000 })], now, thresholdMs: 60_000 })).toBe(true)
-  expect(isSilent({ messages: [assistant("hi", { created: now - 10_000 })], now, thresholdMs: 60_000 })).toBe(false)
 })

@@ -173,53 +173,9 @@ test("status reports the plan, the running step, the progress line and the diff"
   expect(status.text).toContain("Files: 2 changed +31 −4")
 })
 
-test("a silent running session gets one steer reminder, then the rate limit holds", async () => {
-  const { fixture, tools } = await setup({
-    progressMode: true,
-    replyDelayMs: 3_000,
-    env: {
-      OPENCODE_MCP_DELEGATE_WAIT_MS: "100",
-      OPENCODE_MCP_WAIT_MS: "100",
-      OPENCODE_MCP_SILENT_MS: "30",
-      OPENCODE_MCP_NUDGE_MS: "60000",
-    },
-  })
-  const started = await tools.opencode_delegate.handler({ task: "long job" })
-  expect(started.text).toContain("progress reminder sent")
-  expect(fixture.state.deliveries).toContain("steer")
-  expect(fixture.state.promptTexts[1]).toContain("[reminder]")
-
-  const again = await tools.opencode_session.handler({ action: "wait", session_id: started.structured.session_id })
-  expect(again.structured.state).toBe("running")
-  expect(again.text).not.toContain("progress reminder sent")
-})
-
 test("plan and progress lines stay out of the final answer", async () => {
   const { tools } = await setup({ replies: ["plan: 1) a 2) b\nprogress: 1/2 a done -> b\nREAL ANSWER"] })
   const result = await tools.opencode_delegate.handler({ task: "x" })
   expect(result.structured.text).toBe("REAL ANSWER")
 })
 
-test("plan mode returns the plan and waits for approval instead of doing the work", async () => {
-  const { fixture, tools } = await setup({ replies: ["plan: 1) 读代码 2) 改代码\n风险：无，改动集中在一个文件"] })
-  const result = await tools.opencode_delegate.handler({ task: "改一下", plan: true })
-
-  expect(result.structured.state).toBe("planned")
-  expect(result.structured.plan).toBe(true)
-  expect(result.text).toContain("plan: 1) 读代码")
-  expect(result.text).toContain("Approve:")
-  expect(fixture.state.promptTexts[0]).toStartWith("[Delegation protocol — plan mode]")
-  expect(fixture.state.promptTexts[0]).toContain("Do not call tools")
-  expect([...fixture.sessions.values()][0].metadata).toEqual({ origin: "opencode-delegate", caller: "mcp", plan: true })
-
-  // Direct mode stays the default: no plan flag, no plan-mode preamble.
-  const direct = await setup()
-  await direct.tools.opencode_delegate.handler({ task: "改一下" })
-  expect(direct.fixture.state.promptTexts[0]).toStartWith("[Delegation protocol]")
-  expect([...direct.fixture.sessions.values()][0].metadata.plan).toBeUndefined()
-})
-
-test("plan must be a boolean when present", async () => {
-  const { tools } = await setup()
-  await expect(tools.opencode_delegate.handler({ task: "x", plan: "yes" })).rejects.toThrow(/must be a boolean/)
-})
