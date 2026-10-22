@@ -59,6 +59,7 @@ bun run standby
 | 命令行停止 | `stop.cmd`，`stop.cmd --service` 连服务一起停 |
 | 装上钩子 | `bun run install-hook`（卸载：`bun run uninstall-hook`） |
 | 换个端口 | `bun run start -- --port 8080` |
+| 手机／局域网访问 | 双击 `start-lan.vbs`，或 `bun run start -- --host 0.0.0.0`（无鉴权，见下） |
 
 重复启动不会起第二个进程：托盘靠互斥量保证单实例，本地服务靠 `/__opencode-web` 探活。
 
@@ -72,11 +73,32 @@ bun run standby
 
 本地验证见 [tests/startup/README.md](tests/startup/README.md)。
 
+### 局域网访问
+
+默认只监听 `127.0.0.1`，手机等其它设备打不开。要让同一局域网内的设备访问，把监听地址改成 `0.0.0.0`：
+
+- 双击 `start-lan.vbs`（图标 + 网关，后台服务照常跟随／按需启动；加 `/lazy` 则只起图标和网关，不弹浏览器）；或
+- 命令行走 `bun run start -- --host 0.0.0.0`，托盘则用 `bun run tray -- --bind-host 0.0.0.0`。
+
+启动日志会列出可用的地址（形如 `LAN (以太网 4): http://192.168.31.186:53123/`）。手机连同一个 Wi-Fi 后直接打开这个地址即可；只想开放某一张网卡时用 `--host 192.168.31.186`（IP 变了要跟着改）。
+
+**没有登录。** 网关会把 opencode 的 Basic 认证补在转发请求上，所以任何能连到这个端口的人都能用你的 opencode、执行工具、读写文件。只在信任的网络里这样开，不要把端口映射到公网。Windows 第一次监听非回环地址时通常弹出防火墙提示，选「允许专用网络」；也可以先用管理员 PowerShell 放行：
+
+```powershell
+New-NetFirewallRule -DisplayName "opencode-web LAN" -Direction Inbound -Protocol TCP -LocalPort 53123 -Action Allow -Profile Private
+```
+
+手机打不开时依次检查：和电脑是否同一子网、防火墙是否放行 53123、有没有别的进程占用端口（网关会顺延端口，以启动日志为准）。
+
+改监听地址只涉及网关（`.opencode-web.pid`）：停掉它再启动即可，`opencode service` 和正在跑的任务不受影响。
+
+想让开机后就一直开着，把 `start-lan.vbs` 的快捷方式放进启动目录（`Win+R` 输入 `shell:startup`），参数带 `/lazy` 可只起图标和网关、不弹浏览器。
+
 ## 它怎么工作
 
 **1. 找服务。** `src/service.mjs` 读 `~/.local/state/opencode/service*.json`（opencode 自己写的服务注册文件，含 url / pid / password），用 `/api/info` 探活；没有健康的就执行 `opencode service start` 并轮询等待。托盘里是同一套逻辑的 PowerShell 版。
 
-**2. 起网页。** `src/ui-server.mjs` 在 `127.0.0.1:53123` 起本地 HTTP 服务：
+**2. 起网页。** `src/ui-server.mjs` 在 `127.0.0.1:53123` 起本地 HTTP 服务（`--host 0.0.0.0` 或 `OPENCODE_WEB_HOST` 可放开到局域网，见上一节）：
 
 - `/api/*`、`/auth/*`、`/openapi.json` → 转发到 opencode，并补上 `Authorization: Basic opencode:<密码>`；
 - 其它路径 → 先看 `webui/` 覆盖层里有没有对应文件，有就直接给，没有就原样转给 opencode 后台；
@@ -113,6 +135,7 @@ UI 和 API 同源，所以界面用 `location.origin` 直连后台，**不用登
 | 变量 | 作用 |
 | --- | --- |
 | `OPENCODE_WEB_PORT` | 本地网页端口，默认 53123 |
+| `OPENCODE_WEB_HOST` | 网页监听的地址，默认 `127.0.0.1`；设成 `0.0.0.0` 让局域网可访问（无鉴权） |
 | `OPENCODE_BIN` | opencode 可执行文件路径，默认 `%APPDATA%\npm\node_modules\@opencode\cli\bin\opencode.exe`，找不到就用 PATH 里的 `opencode` |
 | `OPENCODE_WEB_SHELL` | 跑托盘的 shell，默认优先 `pwsh`，回退 `powershell.exe` |
 | `OPENCODE_WEB_IDLE_MINUTES` | 自动休眠的空闲时长（分钟），默认 15；支持小数 |

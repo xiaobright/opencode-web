@@ -15,6 +15,7 @@
 
 param(
   [int]$Port = 0,
+  [string]$BindHost = $env:OPENCODE_WEB_HOST,
   [switch]$NoBrowser,
   [switch]$NoService,
   [switch]$Lazy
@@ -69,7 +70,8 @@ Write-Log "dpi awareness: $script:DpiMode"
 if ($Port -le 0) {
   $Port = if ($env:OPENCODE_WEB_PORT) { [int]$env:OPENCODE_WEB_PORT } else { 53123 }
 }
-$WebUrl = "http://127.0.0.1:$Port/"
+$WebHost = if (-not $BindHost -or $BindHost -eq "0.0.0.0" -or $BindHost -eq "::") { "127.0.0.1" } else { $BindHost }
+$WebUrl = "http://${WebHost}:$Port/"
 $PidFile = Join-Path $Root ".tray.pid"
 $CliPath =
   if ($env:OPENCODE_BIN) { $env:OPENCODE_BIN }
@@ -161,12 +163,24 @@ function Start-Web {
   $info = New-Object System.Diagnostics.ProcessStartInfo
   $info.FileName = $bun
   $info.Arguments = "run `"$Root\src\start.mjs`" --no-open --port $Port"
+  if ($BindHost) { $info.Arguments += " --host $BindHost" }
   if ($Lazy -or $NoService) { $info.Arguments += " --lazy" }
   $info.WorkingDirectory = $Root
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $state.Web = [System.Diagnostics.Process]::Start($info)
   Write-Log "started the web UI (pid $($state.Web.Id))"
+  if ($BindHost -and $BindHost -notin @("127.0.0.1", "localhost", "::1")) {
+    # The gateway's own log goes to a hidden console, so its LAN banner would never be read here.
+    $addresses = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+      Where-Object { $_.OperationalStatus -eq "Up" -and $_.NetworkInterfaceType -ne "Loopback" } |
+      ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+      Where-Object { $_.Address.AddressFamily -eq "InterNetwork" } |
+      ForEach-Object { $_.Address.ToString() } |
+      Select-Object -Unique
+    foreach ($address in $addresses) { Write-Log "LAN: http://${address}:$Port/" }
+    Write-Log "LAN access has no authentication; anyone who can reach the port can use opencode"
+  }
   # Wait for the gateway listener only; the backend is never needed here.
   for ($attempt = 0; $attempt -lt 50; $attempt++) {
     if (Test-Web) { return }
@@ -339,7 +353,7 @@ function Update-Tray {
 
 # --- start ------------------------------------------------------------------
 
-Write-Log "starting (port $Port, service-start $(-not $NoService))"
+Write-Log "starting (port $Port, host $(if ($BindHost) { $BindHost } else { '127.0.0.1' }), service-start $(-not $NoService))"
 
 if (-not $Lazy -and -not (Find-Service) -and -not $NoService) {
   Write-Log "no service running; starting one"
