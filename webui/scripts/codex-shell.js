@@ -125,6 +125,8 @@
     down: '<path d="m6 9.5 6 6.5 6-6.5"/>',
     refresh: '<path d="M19.6 12a7.6 7.6 0 1 1-2.3-5.4"/><path d="M19.6 4.6V10H14"/>',
     rows: '<path d="M4 6h.01M4 12h.01M4 18h.01M8.5 6H20M8.5 12H20M8.5 18H20"/>',
+    // 行尾的三点菜单（会话 / 工作区）
+    more: '<circle cx="5.2" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.8" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
   }
 
@@ -356,13 +358,13 @@
     return groups
   }
 
-  async function refresh() {
+  async function refresh(force) {
     if (state.loading) return
     state.loading = true
     try {
       var responses = await Promise.all([
         fetch("/api/project", { headers: { accept: "application/json" } }),
-        window.__ocwBackground.refresh(),
+        window.__ocwBackground.refresh(force),
       ])
       if (!responses[0].ok) throw new Error("HTTP " + responses[0].status)
       var projects = await responses[0].json()
@@ -647,10 +649,17 @@
     }
 
     var shown = 0
+    var hidden = 0
 
     for (var i = 0; i < state.groups.length; i++) {
       var item = state.groups[i]
       var sessions = item.sessions
+
+      // 隐藏只作用于浏览：搜索时仍然能翻到，否则“藏起来”会变成“找不到”。
+      if (!filterText && hiddenGroups.has(item.id)) {
+        hidden++
+        continue
+      }
 
       if (filterText) {
         sessions = sessions.filter(function (session) {
@@ -666,6 +675,7 @@
       var isCollapsed = !filterText && collapsedGroups.has(item.id)
 
       var section = el("section", "ocw-group")
+      section.setAttribute("data-group-id", item.id)
       if (isCollapsed) section.classList.add("is-collapsed")
       if (hasActive) section.classList.add("has-active")
 
@@ -701,6 +711,27 @@
 
       row.appendChild(head)
       row.appendChild(add)
+
+      var groupMenu = el("button", "ocw-group-menu", icon("more", 16))
+      groupMenu.type = "button"
+      groupMenu.title = item.name + " 的操作"
+      groupMenu.setAttribute("aria-label", groupMenu.title)
+      groupMenu.addEventListener("click", function (button, group) {
+        return function (event) {
+          event.preventDefault()
+          event.stopPropagation()
+          openGroupMenu(button, group)
+        }
+      }(groupMenu, item))
+      row.appendChild(groupMenu)
+
+      row.addEventListener("contextmenu", function (element, group) {
+        return function (event) {
+          event.preventDefault()
+          openGroupMenu(element, group)
+        }
+      }(row, item))
+
       section.appendChild(row)
 
       if (!isCollapsed) {
@@ -717,9 +748,18 @@
       list.appendChild(section)
     }
 
-    if (!shown) list.appendChild(message(filterText ? "没有匹配的会话" : "还没有会话"))
+    if (!shown && !hidden) list.appendChild(message(filterText ? "没有匹配的会话" : "还没有会话"))
+    if (hidden) list.appendChild(hiddenRow(hidden))
 
     syncBusy()
+  }
+
+  function hiddenRow(count) {
+    var row = el("button", "ocw-more ocw-unhide")
+    row.type = "button"
+    row.textContent = "显示 " + count + " 个已隐藏的工作区"
+    row.addEventListener("click", function () { showHiddenGroups() })
+    return row
   }
 
   /* 后台任务栏位：MCP 委派出去的会话，按调用方/模型标注，运行中复用行左侧的像素格。 */
@@ -757,6 +797,9 @@
 
   function sessionRow(session, activeId, options) {
     var background = options && options.background
+    // 行本身是按钮（点击进会话），菜单按钮不能嵌进去，所以外面再包一层定位容器。
+    var wrap = el("div", "ocw-session-wrap")
+    wrap.setAttribute("data-session-id", session.id)
     var row = el("button", "ocw-session")
     row.type = "button"
     row.setAttribute("data-id", session.id)
@@ -797,8 +840,323 @@
       if (state.scope !== "foreground") setScope("foreground")
       go("/server/" + keySegment() + "/session/" + session.id)
     })
+    // 右键等价于点三点：同一份菜单，位置贴着这一行。
+    row.addEventListener("contextmenu", function (event) {
+      event.preventDefault()
+      openSessionMenu(row, session)
+    })
 
-    return row
+    var more = el("button", "ocw-row-menu", icon("more", 16))
+    more.type = "button"
+    more.title = "会话操作"
+    more.setAttribute("aria-label", more.title)
+    more.addEventListener("click", function (event) {
+      event.preventDefault()
+      event.stopPropagation()
+      openSessionMenu(more, session)
+    })
+
+    wrap.appendChild(row)
+    wrap.appendChild(more)
+    return wrap
+  }
+
+  /* ── 行尾菜单：会话（重命名 / 移动 / 删除）与工作区（重命名 / 隐藏 / 清空） ── */
+
+  var rowMenu = null
+
+  function closeRowMenu() {
+    if (!rowMenu) return
+    rowMenu.remove()
+    rowMenu = null
+    document.removeEventListener("mousedown", onMenuOutside, true)
+    document.removeEventListener("keydown", onMenuKey, true)
+    window.removeEventListener("resize", closeRowMenu)
+  }
+
+  function onMenuOutside(event) {
+    if (rowMenu && !rowMenu.contains(event.target)) closeRowMenu()
+  }
+
+  function onMenuKey(event) {
+    if (event.key !== "Escape") return
+    event.stopPropagation()
+    closeRowMenu()
+  }
+
+  function openRowMenu(anchor, build) {
+    closeRowMenu()
+    var menu = el("div", "ocw-menu")
+    menu.setAttribute("role", "menu")
+    build(menu)
+    document.body.appendChild(menu)
+
+    // 贴着按钮放；右边或下边放不下时翻到另一侧，别跑出窗口。
+    var rect = anchor.getBoundingClientRect()
+    var box = menu.getBoundingClientRect()
+    var left = Math.max(8, Math.min(rect.right - box.width, window.innerWidth - box.width - 8))
+    var top = rect.bottom + 4
+    if (top + box.height > window.innerHeight - 8) top = Math.max(8, rect.top - box.height - 4)
+    menu.style.left = left + "px"
+    menu.style.top = top + "px"
+
+    rowMenu = menu
+    document.addEventListener("mousedown", onMenuOutside, true)
+    document.addEventListener("keydown", onMenuKey, true)
+    window.addEventListener("resize", closeRowMenu)
+    return menu
+  }
+
+  function menuItem(menu, label, options) {
+    var settings = options || {}
+    var item = el("button", "ocw-menu-item")
+    item.type = "button"
+    item.setAttribute("role", "menuitem")
+    if (settings.danger) item.classList.add("is-danger")
+    item.textContent = label
+    item.addEventListener("click", function (event) {
+      event.preventDefault()
+      event.stopPropagation()
+      // keep：留在同一个弹层里换内容（移动目标列表、返回上一级）
+      if (!settings.keep) closeRowMenu()
+      if (settings.onSelect) settings.onSelect()
+    })
+    menu.appendChild(item)
+    return item
+  }
+
+  function menuNote(menu, text) {
+    var note = el("div", "ocw-menu-note")
+    note.textContent = text
+    menu.appendChild(note)
+    return note
+  }
+
+  async function mutate(path, options) {
+    var settings = options || {}
+    var response = await fetch(path, {
+      method: settings.method || "POST",
+      headers: {
+        accept: "application/json",
+        ...(settings.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: settings.body === undefined ? undefined : JSON.stringify(settings.body),
+    })
+    if (!response.ok) throw new Error("HTTP " + response.status)
+    if (response.status === 204) return null
+    return response.json().catch(function () { return null })
+  }
+
+  function openSessionMenu(anchor, session) {
+    openRowMenu(anchor, function (menu) {
+      renderSessionMenu(menu, session)
+    })
+  }
+
+  function renderSessionMenu(menu, session) {
+    menu.textContent = ""
+    menuItem(menu, "重命名", { onSelect: function () { renameSession(session) } })
+    menuItem(menu, "移动到工作区…", {
+      keep: true,
+      onSelect: function () { void renderMoveTargets(menu, session) },
+    })
+    menuItem(menu, "删除会话", { danger: true, onSelect: function () { void removeSession(session) } })
+  }
+
+  async function renderMoveTargets(menu, session) {
+    menu.textContent = ""
+    menuItem(menu, "← 返回", { keep: true, onSelect: function () { renderSessionMenu(menu, session) } })
+    menuNote(menu, "正在读取工作区…")
+    try {
+      var response = await fetch("/api/project", { headers: { accept: "application/json" } })
+      if (!response.ok) throw new Error("HTTP " + response.status)
+      var projects = await response.json()
+      var current = session.location && session.location.directory
+      // 目录不存在时 /move 会返回 400（已实测），所以这里不猜哪些项目还“活着”，
+      // 直接列出全部候选；真的移不过去会弹错误，而不是悄悄消失。
+      var seen = new Set()
+      var live = new Set()
+      state.groups.forEach(function (group) { live.add(group.path) })
+      state.background.forEach(function (item) {
+        if (item.location && item.location.directory) live.add(item.location.directory)
+      })
+      var label = function (project) { return String(project.name || basename(project.canonical)) }
+      var targets = (Array.isArray(projects) ? projects : [])
+        .filter(function (project) {
+          if (!project || !project.canonical || project.canonical === current) return false
+          if (seen.has(project.canonical)) return false
+          seen.add(project.canonical)
+          return true
+        })
+        .sort(function (a, b) {
+          // 有会话的工作区排前面，其余按名字排：常用目标不用翻。
+          var weight = Number(live.has(b.canonical)) - Number(live.has(a.canonical))
+          return weight || label(a).localeCompare(label(b), "zh")
+        })
+      menu.textContent = ""
+      menuItem(menu, "← 返回", { keep: true, onSelect: function () { renderSessionMenu(menu, session) } })
+      if (!targets.length) {
+        menuNote(menu, "没有其他工作区")
+        return
+      }
+      targets.forEach(function (project) {
+        menuItem(menu, project.name || basename(project.canonical), {
+          onSelect: function () { void moveSession(session, project) },
+        })
+      })
+    } catch (error) {
+      menu.textContent = ""
+      menuItem(menu, "← 返回", { keep: true, onSelect: function () { renderSessionMenu(menu, session) } })
+      menuNote(menu, "读取工作区失败：" + String((error && error.message) || error))
+    }
+  }
+
+  function renameSession(session) {
+    var host = document.querySelector('.ocw-session-wrap[data-session-id="' + session.id + '"]')
+    if (!host) return
+    startRename(host, session.title || "", function (title) {
+      return mutate("/api/session/" + encodeURIComponent(session.id), { method: "PATCH", body: { title } }).then(function () {
+        // 先改本地缓存再刷新：否则下一帧会先跳回旧标题。
+        if (window.__ocwBackground) window.__ocwBackground.patch(session.id, { title: title })
+      })
+    })
+  }
+
+  async function moveSession(session, project) {
+    try {
+      await mutate("/api/session/" + encodeURIComponent(session.id) + "/move", { body: { directory: project.canonical } })
+      if (window.__ocwBackground) window.__ocwBackground.patch(session.id, { location: { directory: project.canonical } })
+      await refresh(true)
+    } catch (error) {
+      window.alert("移动失败：" + String((error && error.message) || error))
+    }
+  }
+
+  async function removeSession(session) {
+    var name = session.title || "未命名会话"
+    if (!window.confirm("删除会话「" + name + "」？此操作不可撤销。")) return
+    try {
+      await mutate("/api/session/" + encodeURIComponent(session.id), { method: "DELETE" })
+      if (window.__ocwBackground) window.__ocwBackground.forget(session.id)
+      if (currentSessionId() === session.id) go("/")
+      await refresh(true)
+    } catch (error) {
+      window.alert("删除失败：" + String((error && error.message) || error))
+    }
+  }
+
+  function openGroupMenu(anchor, group) {
+    openRowMenu(anchor, function (menu) {
+      menuItem(menu, "重命名工作区", { onSelect: function () { renameGroup(group) } })
+      menuItem(menu, "隐藏工作区", { onSelect: function () { hideGroup(group.id) } })
+      menuItem(menu, "删除全部会话（" + group.sessions.length + "）", {
+        danger: true,
+        onSelect: function () { void removeGroupSessions(group) },
+      })
+    })
+  }
+
+  function renameGroup(group) {
+    var host = document.querySelector('.ocw-group[data-group-id="' + group.id + '"] .ocw-group-row')
+    if (!host) return
+    startRename(host, group.name, function (name) {
+      return mutate("/api/project/" + encodeURIComponent(group.id), { method: "PATCH", body: { name } })
+    })
+  }
+
+  async function removeGroupSessions(group) {
+    if (!window.confirm("删除「" + group.name + "」下的 " + group.sessions.length + " 个会话？此操作不可撤销。")) return
+    var active = currentSessionId()
+    var deletedActive = false
+    try {
+      for (var i = 0; i < group.sessions.length; i++) {
+        var session = group.sessions[i]
+        await mutate("/api/session/" + encodeURIComponent(session.id), { method: "DELETE" })
+        if (window.__ocwBackground) window.__ocwBackground.forget(session.id)
+        if (session.id === active) deletedActive = true
+      }
+      if (deletedActive) go("/")
+      await refresh(true)
+    } catch (error) {
+      window.alert("删除失败：" + String((error && error.message) || error))
+      await refresh(true)
+    }
+  }
+
+  /** 就地改名：输入框盖在行上，Enter / 失焦保存，Esc 取消。 */
+  function startRename(host, value, save) {
+    if (host.querySelector(".ocw-rename")) return
+    var input = el("input", "ocw-rename")
+    input.type = "text"
+    input.value = value
+    input.setAttribute("aria-label", "重命名")
+    var settled = false
+
+    function finish(commit) {
+      if (settled) return
+      settled = true
+      var next = input.value.trim()
+      input.remove()
+      host.classList.remove("is-renaming")
+      if (!commit || !next || next === value) {
+        renderList(query())
+        return
+      }
+      Promise.resolve()
+        .then(function () { return save(next) })
+        .then(function () { return refresh(true) })
+        .catch(function (error) {
+          window.alert("重命名失败：" + String((error && error.message) || error))
+          renderList(query())
+        })
+    }
+
+    input.addEventListener("keydown", function (event) {
+      event.stopPropagation()
+      if (event.key === "Enter") {
+        event.preventDefault()
+        finish(true)
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        finish(false)
+      }
+    })
+    input.addEventListener("click", function (event) { event.stopPropagation() })
+    input.addEventListener("blur", function () { finish(true) })
+
+    host.classList.add("is-renaming")
+    host.appendChild(input)
+    input.focus()
+    input.select()
+  }
+
+  /* 隐藏工作区只写本机 localStorage：项目实体没有删除接口，隐藏是唯一的“关掉它”。 */
+  var HIDDEN_KEY = "ocw-hidden-groups"
+  var hiddenGroups = readHiddenGroups()
+
+  function readHiddenGroups() {
+    try {
+      var stored = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")
+      return new Set(Array.isArray(stored) ? stored : [])
+    } catch (error) {
+      return new Set()
+    }
+  }
+
+  function writeHiddenGroups() {
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenGroups))) } catch (error) { }
+  }
+
+  function hideGroup(id) {
+    hiddenGroups.add(id)
+    writeHiddenGroups()
+    renderList(query())
+  }
+
+  function showHiddenGroups() {
+    hiddenGroups.clear()
+    writeHiddenGroups()
+    renderList(query())
   }
 
   /* ── 侧栏工作指示：事件流（实时）+ /api/session/active（权威）两条来源。

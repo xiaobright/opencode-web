@@ -44,9 +44,9 @@
       next: next,
     }
   }
-  async function refresh() {
+  async function refresh(force) {
     if (refreshing) return refreshing
-    if (Date.now() - refreshed < 1000) return snapshot()
+    if (!force && Date.now() - refreshed < 1000) return snapshot()
     refreshing = (async function () {
       var bodies = await Promise.all([get("/api/session?order=desc"), get("/api/session/active")])
       var listed = array(bodies[0])
@@ -112,5 +112,21 @@
       }
     })
   }
-  window.__ocwBackground = { refresh: refresh, loadMore: loadMore, details: details }
+  // 改名/移动之后直接改本地缓存：等下一次整表刷新会让标题先跳回旧的。
+  function patchSession(id, changes) {
+    var item = history.get(id)
+    if (item) history.set(id, Object.assign({}, item, changes))
+    cache.delete(id)
+    return snapshot()
+  }
+
+  // 删除的会话不会出现在下一页里，历史表得主动清，否则它会一直留在侧栏。
+  function forgetSession(id) {
+    history.delete(id)
+    cache.delete(id)
+    metadataAt.delete(id)
+    return snapshot()
+  }
+
+  window.__ocwBackground = { refresh: refresh, loadMore: loadMore, details: details, patch: patchSession, forget: forgetSession }
 })()
